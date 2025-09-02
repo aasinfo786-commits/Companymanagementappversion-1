@@ -1,0 +1,375 @@
+now update customer profile required field:  address, phone number , contact person, mobile number,ntn, strn, cnic means idcard number, rate choice numeric field, credit limit , credit days, selection boxes of Province, Cities, Sales Person. get all of this from models/Provinces.js models/Cities.js models/SalesPerson.js get that from theme there are title field code field provinceId field and in sales person there is name and code field get data from them and show ,  : "// src/pages/RegionalCoding/CustomerProfile.jsx
+import { useState, useEffect } from 'react';
+import { useAppContext } from '../../contexts/AppContext';
+import { 
+  Users,
+  Save, 
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  ChevronDown,
+  X
+} from 'lucide-react';
+
+export default function CustomerProfile() {
+  const { companyId } = useAppContext();
+  const [selectedDebtorAccount, setSelectedDebtorAccount] = useState('');
+  const [selectedSubAccount, setSelectedSubAccount] = useState('');
+  const [debtorAccounts, setDebtorAccounts] = useState([]);
+  const [subAccounts, setSubAccounts] = useState([]);
+  const [filteredSubAccounts, setFilteredSubAccounts] = useState([]);
+  const [isDebtorComboboxOpen, setIsDebtorComboboxOpen] = useState(false);
+  const [isSubAccountComboboxOpen, setIsSubAccountComboboxOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [subAccountSearchTerm, setSubAccountSearchTerm] = useState('');
+  const [message, setMessage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [initialLoad, setInitialLoad] = useState(true);
+
+  const inputClass = "w-full p-3 rounded-2xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm";
+
+  const fetchDebtorAccounts = async () => {
+    if (!companyId) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch(`http://localhost:5000/api/customer-profile/debtor-accounts/${companyId}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to fetch debtor accounts');
+      setDebtorAccounts(json);
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.message || 'Failed to fetch debtor accounts'
+      });
+    } finally {
+      setLoading(false);
+      setInitialLoad(false);
+    }
+  };
+
+  const fetchSubAccounts = async (code) => {
+    if (!companyId || !code) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch(`http://localhost:5000/api/customer-profile/sub-accounts/${companyId}?code=${code}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to fetch level 4 accounts');
+      setSubAccounts(json);
+      setFilteredSubAccounts(json);
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.message || 'Failed to fetch level 4 accounts'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDefaultDebtorAccount = async () => {
+    if (!companyId) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch(`http://localhost:5000/api/customer-profile/default-debtor-account/${companyId}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to fetch default debtor account');
+      if (json.defaultDebtorAccountId) {
+        setSelectedDebtorAccount(json.defaultDebtorAccountId);
+        // Fetch sub accounts when default debtor is loaded
+        const selectedDebtor = debtorAccounts.find(da => da._id === json.defaultDebtorAccountId);
+        if (selectedDebtor) {
+          fetchSubAccounts(selectedDebtor.code);
+        }
+      }
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.message || 'Failed to fetch default debtor account'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (companyId) {
+      fetchDebtorAccounts();
+      fetchDefaultDebtorAccount();
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    if (selectedDebtorAccount) {
+      const selectedDebtor = debtorAccounts.find(da => da._id === selectedDebtorAccount);
+      if (selectedDebtor) {
+        fetchSubAccounts(selectedDebtor.code);
+      }
+    } else {
+      setSubAccounts([]);
+      setFilteredSubAccounts([]);
+      setSelectedSubAccount('');
+    }
+  }, [selectedDebtorAccount, debtorAccounts]);
+
+  useEffect(() => {
+    const filtered = subAccounts.filter(sa => 
+      sa.title.toLowerCase().includes(subAccountSearchTerm.toLowerCase()) ||
+      sa.fullcode.toLowerCase().includes(subAccountSearchTerm.toLowerCase())
+    );
+    setFilteredSubAccounts(filtered);
+  }, [subAccountSearchTerm, subAccounts]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!companyId) {
+      setMessage({
+        type: "error",
+        text: "Please select a company first"
+      });
+      return;
+    }
+
+    if (!selectedDebtorAccount || !selectedSubAccount) {
+      setMessage({
+        type: "error",
+        text: "Please select both a debtor account and a level 4 account"
+      });
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch(`http://localhost:5000/api/customer-profile/default-debtor-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyId,
+          debtorAccountId: selectedDebtorAccount,
+          subAccountId: selectedSubAccount
+        })
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) throw new Error(json.error || 'Error occurred');
+
+      setMessage({
+        type: "success",
+        text: "Default debtor account saved successfully!"
+      });
+
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.message
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredDebtorAccounts = debtorAccounts.filter(da => 
+    da.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    da.code.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const getSelectedDebtorName = () => {
+    const selected = debtorAccounts.find(da => da._id === selectedDebtorAccount);
+    return selected ? `${selected.code} - ${selected.title}` : 'Select Debtors Account';
+  };
+
+  const getSelectedSubAccountName = () => {
+    const selected = subAccounts.find(sa => sa._id === selectedSubAccount);
+    return selected ? `${selected.fullcode} - ${selected.title}` : 'Select Level 4 Account';
+  };
+
+  return (
+    <div className="ml-0 md:ml-64 transition-all duration-300">
+      <div className="max-w-5xl mx-auto mt-10 p-8 bg-white dark:bg-gray-900 rounded-2xl shadow-lg">
+        <h2 className="text-3xl font-bold text-center text-blue-600 dark:text-blue-400 mb-8 flex items-center justify-center gap-2">
+          <Users className="w-8 h-8" />
+          Customer Profile
+        </h2>
+
+        {message && (
+          <div
+            className={`mb-6 p-4 rounded-xl text-white font-medium shadow-md flex items-center gap-2 ${
+              message.type === "success" ? "bg-green-500" : "bg-red-500"
+            }`}
+          >
+            {message.type === "success" ? (
+              <CheckCircle2 className="w-5 h-5" />
+            ) : (
+              <AlertCircle className="w-5 h-5" />
+            )}
+            {message.text}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5 mb-8">
+          {/* Parent Account (Debtor Account) Combo */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Debtors Account
+            </label>
+            <button
+              type="button"
+              onClick={() => setIsDebtorComboboxOpen(!isDebtorComboboxOpen)}
+              className={`${inputClass} flex items-center justify-between cursor-pointer text-left`}
+              disabled={loading || !companyId}
+            >
+              <span className="truncate">{getSelectedDebtorName()}</span>
+              {selectedDebtorAccount ? (
+                <X 
+                  className="w-5 h-5 text-gray-500 hover:text-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedDebtorAccount('');
+                  }}
+                />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-gray-500" />
+              )}
+            </button>
+            
+            {isDebtorComboboxOpen && (
+              <div className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 max-h-96 overflow-auto">
+                <div className="p-2 sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <input
+                    type="text"
+                    placeholder="Search Debtor accounts..."
+                    className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                
+                {filteredDebtorAccounts.length > 0 ? (
+                  <ul>
+                    {filteredDebtorAccounts.map((debtorAccount) => (
+                      <li 
+                        key={debtorAccount._id}
+                        className={`p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer ${debtorAccount._id === selectedDebtorAccount ? 'bg-blue-50 dark:bg-blue-900' : ''}`}
+                        onClick={() => {
+                          setSelectedDebtorAccount(debtorAccount._id);
+                          setIsDebtorComboboxOpen(false);
+                          setSearchTerm('');
+                        }}
+                      >
+                        <div className="font-medium">{debtorAccount.code} - {debtorAccount.title}</div>
+                        {debtorAccount.isDefault && (
+                          <div className="text-xs text-green-600 dark:text-green-400 mt-1">
+                            Default Account
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                    {initialLoad ? 'Loading...' : 'No debtor accounts found'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Sub Account (Account Level 4) Combo */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Account Level 4
+            </label>
+            <button
+              type="button"
+              onClick={() => selectedDebtorAccount && setIsSubAccountComboboxOpen(!isSubAccountComboboxOpen)}
+              className={`${inputClass} flex items-center justify-between cursor-pointer text-left ${
+                !selectedDebtorAccount ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              disabled={loading || !companyId || !selectedDebtorAccount}
+            >
+              <span className="truncate">{getSelectedSubAccountName()}</span>
+              {selectedSubAccount ? (
+                <X 
+                  className="w-5 h-5 text-gray-500 hover:text-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSubAccount('');
+                  }}
+                />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-gray-500" />
+              )}
+            </button>
+            
+            {isSubAccountComboboxOpen && selectedDebtorAccount && (
+              <div className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 max-h-96 overflow-auto">
+                <div className="p-2 sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <input
+                    type="text"
+                    placeholder="Search Level 4 accounts..."
+                    className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    value={subAccountSearchTerm}
+                    onChange={(e) => setSubAccountSearchTerm(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                
+                {filteredSubAccounts.length > 0 ? (
+                  <ul>
+                    {filteredSubAccounts.map((subAccount) => (
+                      <li 
+                        key={subAccount._id}
+                        className={`p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer ${subAccount._id === selectedSubAccount ? 'bg-blue-50 dark:bg-blue-900' : ''}`}
+                        onClick={() => {
+                          setSelectedSubAccount(subAccount._id);
+                          setIsSubAccountComboboxOpen(false);
+                          setSubAccountSearchTerm('');
+                        }}
+                      >
+                        <div className="font-medium">{subAccount.fullcode} - {subAccount.title}</div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                    {subAccounts.length === 0 ? 'No level 4 accounts found for this debtor account' : 'No matching level 4 accounts found'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !companyId || !selectedDebtorAccount || !selectedSubAccount}
+            className={`w-full p-3 rounded-2xl font-semibold text-lg flex items-center justify-center gap-2 shadow-md transition ${
+              "bg-blue-600 hover:bg-blue-700 text-white"
+            } ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
+          >
+            {loading ? (
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            ) : (
+              <Save className="w-5 h-5" />
+            )}
+            Save Customer Profile
+          </button>
+        </form>
+
+        {!companyId && (
+          <div className="p-6 text-center text-gray-500 dark:text-gray-400">
+            Please select a company to configure customer profile
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}"

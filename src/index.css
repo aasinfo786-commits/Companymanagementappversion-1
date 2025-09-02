@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply transition-colors duration-300;
+  overflow: hidden; /* Remove scrollbars */
+}
+
+/* For browsers that don't support transform-origin */
+@supports not (transform-origin: top left) {
+  body {
+    zoom: 80%;
+  }
+}
