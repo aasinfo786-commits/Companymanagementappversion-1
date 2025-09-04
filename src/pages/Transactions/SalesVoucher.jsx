@@ -41,6 +41,7 @@ import {
 
 import { FiFileText, FiPlus, FiTrash2, FiPrinter, FiFile } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
+import QRCode from 'qrcode';
 
 export default function SalesVoucher() {
   const { companyId } = useAppContext();
@@ -115,7 +116,7 @@ export default function SalesVoucher() {
   const [unitMeasurements, setUnitMeasurements] = useState([]);
   const [isUnitMeasurementComboboxOpen, setIsUnitMeasurementComboboxOpen] = useState(false);
   const [unitMeasurementSearchTerm, setUnitMeasurementSearchTerm] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState('');
   const [rate, setRate] = useState(0);
   const [amount, setAmount] = useState(0);
   const [rateInfo, setRateInfo] = useState(null);
@@ -183,6 +184,10 @@ const [reportChildCenters, setReportChildCenters] = useState([]);
 const [reportFinishedGoods, setReportFinishedGoods] = useState([]);
 const [reportAccountLevel4s, setReportAccountLevel4s] = useState([]);
 const [isReportDataLoading, setIsReportDataLoading] = useState(false);
+
+const [fbrResponse, setFbrResponse] = useState(null);
+const [showFbrResponseModal, setShowFbrResponseModal] = useState(false);
+
 
 // Fetch debtor accounts for report
 useEffect(() => {
@@ -991,6 +996,95 @@ useEffect(() => {
   };
 }, []);
 
+const getHSCodeForItem = async (companyId, finishedGoodId, accountLevel4Id) => {
+  console.log('🔍 [getHSCodeForItem] Called with:', {
+    companyId,
+    finishedGoodId,
+    accountLevel4Id
+  });
+  
+  if (!companyId || !finishedGoodId || !accountLevel4Id) {
+    console.error('❌ [getHSCodeForItem] Missing required parameters:', {
+      companyId: !!companyId,
+      finishedGoodId: !!finishedGoodId,
+      accountLevel4Id: !!accountLevel4Id
+    });
+    return '';
+  }
+  
+  try {
+    // Ensure IDs are properly formatted as strings
+    let fgId = finishedGoodId;
+    if (typeof finishedGoodId === 'object') {
+      // If it's a MongoDB ObjectId, it might have a $oid property
+      if (finishedGoodId.$oid) {
+        fgId = finishedGoodId.$oid;
+      } else if (finishedGoodId._id) {
+        // If it's an object with an _id property
+        fgId = typeof finishedGoodId._id === 'object' ? 
+          (finishedGoodId._id.$oid || finishedGoodId._id.toString()) : 
+          finishedGoodId._id;
+      } else {
+        // Try to convert the object to a string
+        try {
+          fgId = finishedGoodId.toString();
+        } catch (e) {
+          console.error('❌ [getHSCodeForItem] Error converting finishedGoodId to string:', e);
+          fgId = String(finishedGoodId);
+        }
+      }
+    }
+    
+    let al4Id = accountLevel4Id;
+    if (typeof accountLevel4Id === 'object') {
+      // If it's a MongoDB ObjectId, it might have a $oid property
+      if (accountLevel4Id.$oid) {
+        al4Id = accountLevel4Id.$oid;
+      } else if (accountLevel4Id._id) {
+        // If it's an object with an _id property
+        al4Id = typeof accountLevel4Id._id === 'object' ? 
+          (accountLevel4Id._id.$oid || accountLevel4Id._id.toString()) : 
+          accountLevel4Id._id;
+      } else {
+        // Try to convert the object to a string
+        try {
+          al4Id = accountLevel4Id.toString();
+        } catch (e) {
+          console.error('❌ [getHSCodeForItem] Error converting accountLevel4Id to string:', e);
+          al4Id = String(accountLevel4Id);
+        }
+      }
+    }
+    
+    console.log('🔍 [getHSCodeForItem] Formatted IDs:', {
+      finishedGoodId: fgId,
+      accountLevel4Id: al4Id
+    });
+    
+    const url = `http://localhost:5000/api/item-profile/${companyId}/hs-code?finishedGoodId=${encodeURIComponent(fgId)}&accountLevel4Id=${encodeURIComponent(al4Id)}`;
+    console.log('🌐 [getHSCodeForItem] Fetching URL:', url);
+    
+    const response = await fetch(url);
+    console.log('📡 [getHSCodeForItem] Response status:', response.status, response.statusText);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ [getHSCodeForItem] Failed to fetch HS Code:', errorText);
+      return '';
+    }
+    
+    const data = await response.json();
+    console.log('✅ [getHSCodeForItem] API response data:', data);
+    
+    const hsCode = data.hsCode || '';
+    console.log('🏷️ [getHSCodeForItem] Extracted HS Code:', hsCode);
+    
+    return hsCode;
+  } catch (err) {
+    console.error('❌ [getHSCodeForItem] Error fetching HS Code:', err);
+    return '';
+  }
+};
 
 
 
@@ -1019,49 +1113,79 @@ useEffect(() => {
     rateInfo: null
   });
 
-  const addItem = () => {
-    // Validate form data
-    if (!selectedGoDown) {
-      setMessage({ type: "error", text: 'Please select a GoDown' });
-      return;
-    }
-    if (!selectedDebtorAccount || !selectedSubAccount) {
-      setMessage({ type: "error", text: 'Please select both a debtor account and a level 4 account' });
-      return;
-    }
-    if (quantity <= 0) {
-      setMessage({ type: "error", text: 'Quantity must be greater than 0' });
-      return;
-    }
-    if (rate <= 0) {
-      setMessage({ type: "error", text: 'Rate must be greater than 0' });
-      return;
-    }
-
-    const selectedFinishedGoodObj = finishedGoods.find(fg => fg._id === selectedFinishedGood);
-    const newItem = {
-      finishedGoodId: selectedFinishedGood,
-      finishedGoodCode: selectedFinishedGoodObj?.code || '',
-      finishedGoodTitle: selectedFinishedGoodObj?.title || '',
-      accountLevel4Id: selectedAccountLevel4,
-      unitMeasurementId: selectedUnitMeasurement,
-      quantity: quantity,
-      rate: rate,
-      amount: amount,
-      netAmountBeforeTax: netAmountBeforeTax,
-      netAmount: netAmount,
-      discountBreakdown: discountBreakdown,
-      taxBreakdown: taxBreakdown,
-      rateInfo: rateInfo,
-      productName: getSelectedAccountLevel4Name(),
-      unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
-      unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : ''
-    };
-    setItems([...items, newItem]);
-    setMessage({ type: "success", text: "Item added to invoice! You can add more or save the invoice." });
-    // Reset form for next item
-    resetForm();
+const addItem = async () => {
+  // Validate form data
+  if (!selectedGoDown) {
+    setMessage({ type: "error", text: 'Please select a GoDown' });
+    return;
+  }
+  if (!selectedDebtorAccount || !selectedSubAccount) {
+    setMessage({ type: "error", text: 'Please select both a debtor account and a level 4 account' });
+    return;
+  }
+  if (!selectedFinishedGood) {
+    setMessage({ type: "error", text: 'Please select a finished good' });
+    return;
+  }
+  if (!selectedAccountLevel4) {
+    setMessage({ type: "error", text: 'Please select an account level 4' });
+    return;
+  }
+  if (quantity <= 0) {
+    setMessage({ type: "error", text: 'Quantity must be greater than 0' });
+    return;
+  }
+  // if (rate <= 0) {
+  //   setMessage({ type: "error", text: 'Rate must be greater than 0' });
+  //   return;
+  // }
+  
+  const selectedFinishedGoodObj = finishedGoods.find(fg => fg._id === selectedFinishedGood);
+  const selectedAccountLevel4Obj = accountLevel4s.find(al4 => al4._id === selectedAccountLevel4);
+  
+  console.log('📦 [addItem] Creating new item:', {
+    selectedFinishedGood: selectedFinishedGood,
+    selectedAccountLevel4: selectedAccountLevel4,
+    selectedFinishedGoodObj: selectedFinishedGoodObj?.title,
+    selectedAccountLevel4Obj: selectedAccountLevel4Obj?.title
+  });
+  
+  // Fetch HS code for this item
+  const hsCode = await getHSCodeForItem(
+    companyId, 
+    selectedFinishedGood, 
+    selectedAccountLevel4
+  );
+  
+  console.log('🏷️ [addItem] HS Code for new item:', hsCode);
+  
+  const newItem = {
+    productId: selectedAccountLevel4, // Store the accountLevel4Id as productId (matching the schema)
+    finishedGoodId: selectedFinishedGood,
+    finishedGoodCode: selectedFinishedGoodObj?.code || '',
+    finishedGoodTitle: selectedFinishedGoodObj?.title || '',
+    accountLevel4Id: selectedAccountLevel4,
+    hsCode: hsCode, // Store the HS code
+    unitMeasurementId: selectedUnitMeasurement,
+    quantity: quantity,
+    rate: rate,
+    amount: amount,
+    netAmountBeforeTax: netAmountBeforeTax,
+    netAmount: netAmount,
+    discountBreakdown: discountBreakdown,
+    taxBreakdown: taxBreakdown,
+    rateInfo: rateInfo,
+    productName: getSelectedAccountLevel4Name(),
+    unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
+    unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : ''
   };
+  
+  console.log('✅ [addItem] Created new item:', newItem);
+  setItems([...items, newItem]);
+  setMessage({ type: "success", text: "Item added to invoice! You can add more or save the invoice." });
+  // Reset form for next item
+  resetForm();
+};
 
   useEffect(() => {
     const fetchCompanyDetails = async () => {
@@ -1103,74 +1227,113 @@ useEffect(() => {
     }
   };
 
-  const transformInvoiceToFBRFormat = () => {
-    // Get seller information from company details
-    const sellerBusinessName = companyDetails?.companyName || '';
-    const sellerNTNCNIC = companyDetails?.nationalTaxNumber || '';
-    const sellerAddress = companyDetails?.address1 || '';
-
-    // Get buyer information
-    const subAccountObj = subAccounts.find(sa => sa._id === selectedSubAccount);
-    const buyerBusinessName = subAccountObj ? subAccountObj.title : '';
-    const buyerNTNCNIC = customerProfile?.ntn || '';
-    const buyerAddress = address || '';
-    const buyerRegistrationType = customerProfile?.customerType === 'registered' ? 'Registered' : 'Unregistered';
-
-    // Transform items
-    const transformedItems = items.map(item => {
-      // Calculate total discount for this item
-      const totalDiscount = item.discountBreakdown?.reduce((sum, d) => sum + d.value, 0) || 0;
-
-      // Calculate total tax for this item
-      const totalTax = item.taxBreakdown?.reduce((sum, t) => sum + t.value, 0) || 0;
-
+const transformInvoiceToFBRFormat = async () => {
+  console.log('🔄 [transformInvoiceToFBRFormat] Starting transformation');
+  
+  // Get seller information from company details
+  const sellerBusinessName = companyDetails?.companyName || '';
+  const sellerNTNCNIC = companyDetails?.nationalTaxNumber || '';
+  const sellerAddress = companyDetails?.address1 || '';
+  
+  // Get buyer information
+  const subAccountObj = subAccounts.find(sa => sa._id === selectedSubAccount);
+  const buyerBusinessName = subAccountObj ? subAccountObj.title : '';
+  const buyerNTNCNIC = customerProfile?.ntn || '';
+  const buyerAddress = address || '';
+  const buyerRegistrationType = customerProfile?.customerType === 'registered' ? 'Registered' : 'Unregistered';
+  
+  console.log('👤 [transformInvoiceToFBRFormat] Seller info:', { sellerBusinessName, sellerNTNCNIC });
+  console.log('👤 [transformInvoiceToFBRFormat] Buyer info:', { buyerBusinessName, buyerNTNCNIC, buyerRegistrationType });
+  
+  // Transform items
+  const transformedItems = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    console.log(`📦 [transformInvoiceToFBRFormat] Processing item ${i + 1}/${items.length}:`, {
+      finishedGoodId: item.finishedGoodId,
+      productId: item.productId || item.accountLevel4Id, // Use productId if available, fallback to accountLevel4Id
+      productName: item.productName
+    });
+    
+    // Fetch HS code for this item
+    const hsCode = await getHSCodeForItem(
+      companyId, 
+      item.finishedGoodId || selectedFinishedGood, // Use finishedGoodId from item or current selection
+      item.productId || item.accountLevel4Id      // Use productId from item or accountLevel4Id
+    );
+    
+    console.log(`🏷️ [transformInvoiceToFBRFormat] HS Code for item ${i + 1}:`, hsCode);
+    
+    // Calculate total discount for this item
+    const totalDiscount = item.discountBreakdown?.reduce((sum, d) => sum + d.value, 0) || 0;
+    // Calculate total tax for this item
+    const totalTax = item.taxBreakdown?.reduce((sum, t) => sum + t.value, 0) || 0;
+    
+    // Use the stored isExempted value from the item
+    const isExempted = item.isExempted || false;
+    
+    // Set rate and sale type based on exemption status
+    let rate = "0%";
+    let saleType = "Taxable goods";
+    
+    if (isExempted) {
+      rate = "Exempt";
+      saleType = "Exempt goods";
+    } else {
       // Get tax rate percentage (first tax rate)
-      const taxRate = item.taxBreakdown && item.taxBreakdown.length > 0
+      rate = item.taxBreakdown && item.taxBreakdown.length > 0
         ? `${item.taxBreakdown[0].registeredValue || item.taxBreakdown[0].unregisteredValue}%`
         : '0%';
-
-      return {
-        hsCode: item.hsCode || '',
-        productDescription: item.productName || '',
-        // rate: taxRate,
-        rate: "Exempt",
-        uoM: 'KG',
-        // uoM: item.unitMeasurementTitle || '',
-        quantity: item.quantity,
-        totalValues: item.netAmount,
-        valueSalesExcludingST: item.netAmount - totalTax || 0,
-        fixedNotifiedValueOrRetailPrice: 0,
-        salesTaxApplicable: totalTax,
-        salesTaxWithheldAtSource: 0,
-        extraTax: "",
-        furtherTax: 0,
-        sroScheduleNo: "6th Schd Table I",
-        fedPayable: 0,
-        discount: totalDiscount,
-        saleType: "Exempt goods",
-        sroItemSerialNo: "100"
-      };
-    });
-
-    return {
-      invoiceType: invoiceType,
-      invoiceDate: invoiceDate,
-      sellerBusinessName: sellerBusinessName,
-      sellerProvince: "Punjab", // Default value, adjust as needed
-      sellerNTNCNIC: sellerNTNCNIC,
-      sellerAddress: sellerAddress,
-      buyerNTNCNIC: buyerNTNCNIC,
-      buyerBusinessName: buyerBusinessName,
-      buyerProvince: "Punjab", // Default value, adjust as needed
-      buyerAddress: buyerAddress,
-      invoiceRefNo: invoiceNumber,
-      scenarioId: "SN006", // Default value
-      buyerRegistrationType: buyerRegistrationType,
-      items: transformedItems
+    }
+    
+    const transformedItem = {
+      hsCode: hsCode,
+      productDescription: item.productName || '',
+      rate: rate,
+      uoM: 'KG',
+      quantity: item.quantity,
+      totalValues: item.netAmount,
+      valueSalesExcludingST: item.netAmount - totalTax || 0,
+      fixedNotifiedValueOrRetailPrice: 0,
+      salesTaxApplicable: totalTax,
+      salesTaxWithheldAtSource: 0,
+      extraTax: "",
+      furtherTax: 0,
+      sroScheduleNo: "6th Schd Table I",
+      fedPayable: 0,
+      discount: totalDiscount,
+      saleType: saleType,
+      sroItemSerialNo: "100",
+      isExempted: isExempted
     };
+    
+    console.log(`✨ [transformInvoiceToFBRFormat] Transformed item ${i + 1}:`, transformedItem);
+    transformedItems.push(transformedItem);
+  }
+  
+  const fbrInvoiceData = {
+    invoiceType: invoiceType,
+    invoiceDate: invoiceDate,
+    sellerBusinessName: sellerBusinessName,
+    sellerProvince: "Punjab",
+    sellerNTNCNIC: sellerNTNCNIC,
+    sellerAddress: sellerAddress,
+    buyerNTNCNIC: buyerNTNCNIC,
+    buyerBusinessName: buyerBusinessName,
+    buyerProvince: "Punjab",
+    buyerAddress: buyerAddress,
+    invoiceRefNo: invoiceNumber,
+    scenarioId: "SN006",
+    buyerRegistrationType: buyerRegistrationType,
+    items: transformedItems
   };
+  
+  console.log('🚀 [transformInvoiceToFBRFormat] Final FBR invoice data:', JSON.stringify(fbrInvoiceData, null, 2));
+  return fbrInvoiceData;
+};
 
-  const handlePostInvoice = async () => {
+
+const handlePostInvoice = async () => {
   if (!existingInvoiceData || !existingInvoiceData._id || !companyId) {
     setMessage({ type: "error", text: "No invoice selected to post." });
     return;
@@ -1179,102 +1342,725 @@ useEffect(() => {
   try {
     setLoading(true);
     const invoiceId = existingInvoiceData._id.$oid || existingInvoiceData._id;
-    const response = await fetch(
-      `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}/post`,
-      {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
+    
+    // First, post to FBR and wait for the response
+    const fbrResponse = await postInvoiceToFBR();
+    
+    // If FBR posting was successful, update the local database
+    if (fbrResponse && fbrResponse.success) {
+      // Post to local backend with FBR invoice number
+      const response = await fetch(
+        `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}/post`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            fbrInvoiceNumber: fbrResponse.fbrInvoiceNumber,
+            isPosted: true
+          })
         }
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to post invoice locally');
       }
-    );
-    
-    if (!response.ok) {
-      throw new Error('Failed to post invoice');
+      
+      const data = await response.json();
+      
+      // Update local state
+      setExistingInvoiceData(prev => ({
+        ...prev,
+        isPosted: true,
+        fbrInvoiceNumber: fbrResponse.fbrInvoiceNumber
+      }));
+      setIsInvoicePosted(true);
+      setfbrInvoiceNumber(fbrResponse.fbrInvoiceNumber);
+      
+      setMessage({ type: "success", text: "Invoice posted successfully to FBR and locally! It is now locked." });
+    } else {
+      // If FBR posting failed, still mark as posted locally
+      const response = await fetch(
+        `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}/post`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            isPosted: true
+          })
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to post invoice locally');
+      }
+      
+      const data = await response.json();
+      
+      // Update local state
+      setExistingInvoiceData(prev => ({
+        ...prev,
+        isPosted: true
+      }));
+      setIsInvoicePosted(true);
+      
+      setMessage({ type: "warning", text: "Invoice marked as posted locally, but FBR posting failed." });
     }
-    
-    const data = await response.json();
-    // Update the existingInvoiceData to set isPosted to true
-    setExistingInvoiceData(prev => ({
-      ...prev,
-      isPosted: true
-    }));
-    setIsInvoicePosted(true);
-    setMessage({ type: "success", text: "Invoice posted successfully! It is now locked." });
   } catch (err) {
+    console.error('Error in handlePostInvoice:', err);
     setMessage({ type: "error", text: err.message || "Failed to post invoice" });
   } finally {
     setLoading(false);
   }
 };
 
-
-  // Add this function to validate the invoice with FBR
-  const validateInvoiceWithFBR = async () => {
-    if (!companyId) {
-      setMessage({ type: "error", text: "Company ID is required" });
-      return;
-    }
-
-    if (items.length === 0) {
-      setMessage({ type: "error", text: "No items to validate" });
-      return;
-    }
-
-    setValidating(true);
-    setMessage(null);
-
-    try {
-      // Get FBR token
-      let token = fbrToken;
+const postInvoiceToFBR = async () => {
+  if (!companyId || !existingInvoiceData) {
+    setMessage({ type: "error", text: "No invoice data to post to FBR." });
+    return { success: false, error: "No invoice data to post to FBR" };
+  }
+  
+  try {
+    // Get FBR token
+    let token = fbrToken;
+    if (!token) {
+      token = await fetchFbrToken();
       if (!token) {
-        token = await fetchFbrToken();
-        if (!token) {
-          setMessage({ type: "error", text: "Failed to get FBR token" });
-          setValidating(false);
-          return;
+        setMessage({ type: "error", text: "Failed to get FBR token" });
+        return { success: false, error: "Failed to get FBR token" };
+      }
+    }
+    
+    // Transform existing invoice data to FBR format
+    const fbrInvoiceData = await transformExistingInvoiceToFBRFormat(existingInvoiceData);
+    
+    console.log('FBR Payload:', JSON.stringify(fbrInvoiceData, null, 2));
+    
+    // Post to FBR endpoint
+    const response = await fetch("https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(fbrInvoiceData)
+    });
+    
+    // Get response as text first to handle any format
+    const responseText = await response.text();
+    console.log('FBR Response Status:', response.status);
+    console.log('FBR Response Headers:', response.headers);
+    console.log('FBR Response Text:', responseText);
+    
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (e) {
+      // If response is not JSON, create an error object
+      result = { 
+        error: true,
+        message: responseText,
+        status: response.status,
+        statusText: response.statusText
+      };
+    }
+    
+    console.log('FBR Response:', result);
+    
+    if (response.ok) {
+      // Store the FBR response
+      setFbrResponse(result);
+      
+      // Extract the invoice number from the response
+      const fbrInvoiceNumber = result.invoiceNumber || result.fbrInvoiceNumber || "";
+      
+      if (fbrInvoiceNumber) {
+        // Update local state
+        setfbrInvoiceNumber(fbrInvoiceNumber);
+        setExistingInvoiceData(prev => ({
+          ...prev,
+          fbrInvoiceNumber: fbrInvoiceNumber,
+          isPosted: true
+        }));
+        
+        // Save to database using the dedicated endpoint
+        try {
+          const invoiceId = existingInvoiceData._id.$oid || existingInvoiceData._id;
+          console.log('Updating invoice with ID:', invoiceId, 'with FBR invoice number:', fbrInvoiceNumber);
+          
+          const updateResponse = await fetch(
+            `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}/fbr-invoice-number`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ 
+                fbrInvoiceNumber: fbrInvoiceNumber
+              })
+            }
+          );
+          
+          console.log('Update response status:', updateResponse.status);
+          
+          if (!updateResponse.ok) {
+            const errorText = await updateResponse.text();
+            console.error('Update response error:', errorText);
+            throw new Error(`Failed to update FBR invoice number in database: ${errorText}`);
+          }
+          
+          const updateData = await updateResponse.json();
+          console.log('Database update response:', updateData);
+          
+          // Show the response modal
+          setShowFbrResponseModal(true);
+          
+          // Return success response with FBR invoice number
+          return {
+            success: true,
+            fbrInvoiceNumber: fbrInvoiceNumber,
+            message: "Invoice posted to FBR successfully! FBR invoice number saved to database."
+          };
+        } catch (err) {
+          console.error('Error saving FBR invoice number to database:', err);
+          
+          // Show the response modal
+          setShowFbrResponseModal(true);
+          
+          // Return success response but with a warning
+          return {
+            success: true,
+            fbrInvoiceNumber: fbrInvoiceNumber,
+            warning: "Invoice posted to FBR successfully, but failed to save FBR invoice number to database."
+          };
+        }
+      } else {
+        // Even if there's no FBR invoice number, mark as posted
+        try {
+          const invoiceId = existingInvoiceData._id.$oid || existingInvoiceData._id;
+          
+          const updateResponse = await fetch(
+            `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}/post`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({}) // Empty body since we're just marking as posted
+            }
+          );
+          
+          if (!updateResponse.ok) {
+            throw new Error('Failed to mark invoice as posted in database');
+          }
+          
+          // Show the response modal
+          setShowFbrResponseModal(true);
+          
+          // Return success response without FBR invoice number
+          return {
+            success: true,
+            fbrInvoiceNumber: "",
+            message: "Invoice posted to FBR successfully! No FBR invoice number was returned."
+          };
+        } catch (err) {
+          console.error('Error marking invoice as posted:', err);
+          
+          // Show the response modal
+          setShowFbrResponseModal(true);
+          
+          // Return success response but with a warning
+          return {
+            success: true,
+            fbrInvoiceNumber: "",
+            warning: "Invoice posted to FBR successfully, but failed to update status in database."
+          };
         }
       }
-
-      // Transform invoice data
-      const fbrInvoiceData = transformInvoiceToFBRFormat();
-      console.log('FBR Invoice Data:', fbrInvoiceData);
-      // Call FBR validation API
-      const response = await fetch("https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify(fbrInvoiceData)
+    } else {
+      // Show detailed error in modal
+      setFbrResponse({
+        error: true,
+        status: response.status,
+        statusText: response.statusText,
+        message: result.message || "Failed to post invoice to FBR",
+        details: result
       });
-      const result = await response.json();
-      if (response.ok) {
-        setValidationResult({
-          success: true,
-          message: "Invoice validated successfully with FBR",
-          data: result
-        });
-      } else {
-        setValidationResult({
-          success: false,
-          message: result.message || "Invoice validation failed",
-          data: result
-        });
-      }
+      setShowFbrResponseModal(true);
+      
+      // Return error response
+      return {
+        success: false,
+        error: result.message || "Failed to post invoice to FBR",
+        status: response.status
+      };
+    }
+  } catch (err) {
+    console.error('Error posting invoice to FBR:', err);
+    setMessage({ type: "error", text: err.message || "Error posting invoice to FBR" });
+    
+    // Return error response
+    return {
+      success: false,
+      error: err.message || "Error posting invoice to FBR"
+    };
+  }
+};
 
-      setShowValidationModal(true);
-    } catch (err) {
-      console.error('Error validating invoice with FBR:', err);
+const transformExistingInvoiceToFBRFormat = async (invoice) => {
+  console.log('🔄 [transformExistingInvoiceToFBRFormat] Starting transformation with invoice:', {
+    finishedGoodId: invoice.finishedGoodId,
+    itemsCount: invoice.items?.length || 0
+  });
+  
+  // Get seller information from company details
+  const sellerBusinessName = companyDetails?.companyName || '';
+  const sellerNTNCNIC = companyDetails?.nationalTaxNumber || '';
+  const sellerAddress = companyDetails?.address1 || '';
+  
+  // Get buyer information from the invoice
+  let buyerBusinessName = invoice.subAccountTitle || '';
+  
+  // If subAccountTitle is not available, try to get it from other properties
+  if (!buyerBusinessName && invoice.subAccount) {
+    buyerBusinessName = invoice.subAccount.title || '';
+  } else if (invoice.customerProfile) {
+    buyerBusinessName = invoice.customerProfile.businessName || 
+                        invoice.customerProfile.name || 
+                        invoice.customerProfile.customerName || '';
+  } else if (invoice.buyerBusinessName) {
+    buyerBusinessName = invoice.buyerBusinessName;
+  }
+  
+  const buyerNTNCNIC = invoice.customerProfile?.ntn || '';
+  const buyerAddress = invoice.customerAddress || '';
+  const buyerRegistrationType = invoice.customerProfile?.customerType === 'registered' ? 'Registered' : 'Unregistered';
+  
+  // Format the invoice date properly
+  let formattedInvoiceDate;
+  const today = new Date();
+  
+  if (invoice.invoiceDate) {
+    const invoiceDate = new Date(invoice.invoiceDate);
+    
+    if (!isNaN(invoiceDate.getTime())) {
+      if (invoiceDate > today) {
+        formattedInvoiceDate = today.toISOString().split('T')[0];
+        console.warn('Invoice date was in the future, using current date instead');
+      } else {
+        formattedInvoiceDate = invoiceDate.toISOString().split('T')[0];
+      }
+    } else {
+      formattedInvoiceDate = today.toISOString().split('T')[0];
+    }
+  } else {
+    formattedInvoiceDate = today.toISOString().split('T')[0];
+  }
+  
+  // FIXED: Properly extract finishedGoodId as a string
+  let finishedGoodId = invoice.finishedGoodId;
+  if (typeof finishedGoodId === 'object') {
+    if (finishedGoodId.$oid) {
+      finishedGoodId = finishedGoodId.$oid;
+    } else if (finishedGoodId._id) {
+      finishedGoodId = typeof finishedGoodId._id === 'object' ? 
+        (finishedGoodId._id.$oid || finishedGoodId._id.toString()) : 
+        finishedGoodId._id;
+    } else {
+      try {
+        finishedGoodId = finishedGoodId.toString();
+      } catch (e) {
+        console.error('❌ [transformExistingInvoiceToFBRFormat] Error converting finishedGoodId to string:', e);
+        finishedGoodId = String(finishedGoodId);
+      }
+    }
+  }
+  
+  console.log('🔍 [transformExistingInvoiceToFBRFormat] Extracted finishedGoodId:', finishedGoodId);
+  
+  // Transform items
+  const transformedItems = [];
+  for (let i = 0; i < (invoice.items || []).length; i++) {
+    const item = invoice.items[i];
+    console.log(`📦 [transformExistingInvoiceToFBRFormat] Processing item ${i + 1}:`, {
+      finishedGoodId: finishedGoodId,
+      productId: item.productId,
+      accountLevel4Id: item.accountLevel4Id,
+      productName: item.productName
+    });
+    
+    // FIXED: Properly extract accountLevel4Id as a string
+    let accountLevel4Id = item.accountLevel4Id;
+    if (typeof accountLevel4Id === 'object') {
+      if (accountLevel4Id.$oid) {
+        accountLevel4Id = accountLevel4Id.$oid;
+      } else if (accountLevel4Id._id) {
+        accountLevel4Id = typeof accountLevel4Id._id === 'object' ? 
+          (accountLevel4Id._id.$oid || accountLevel4Id._id.toString()) : 
+          accountLevel4Id._id;
+      } else {
+        try {
+          accountLevel4Id = accountLevel4Id.toString();
+        } catch (e) {
+          console.error('❌ [transformExistingInvoiceToFBRFormat] Error converting accountLevel4Id to string:', e);
+          accountLevel4Id = String(accountLevel4Id);
+        }
+      }
+    }
+    
+    // If accountLevel4Id is still not available, try to get it from productId
+    if (!accountLevel4Id && item.productId) {
+      let productId = item.productId;
+      if (typeof productId === 'object') {
+        if (productId.$oid) {
+          productId = productId.$oid;
+        } else if (productId._id) {
+          productId = typeof productId._id === 'object' ? 
+            (productId._id.$oid || productId._id.toString()) : 
+            productId._id;
+        } else {
+          try {
+            productId = productId.toString();
+          } catch (e) {
+            console.error('❌ [transformExistingInvoiceToFBRFormat] Error converting productId to string:', e);
+            productId = String(productId);
+          }
+        }
+      }
+      accountLevel4Id = productId;
+    }
+    
+    console.log(`🔍 [transformExistingInvoiceToFBRFormat] Extracted accountLevel4Id:`, accountLevel4Id);
+    
+    // Fetch HS code for this item using the properly extracted IDs
+    const hsCode = await getHSCodeForItem(
+      companyId, 
+      finishedGoodId,    // Use properly extracted finishedGoodId
+      accountLevel4Id    // Use properly extracted accountLevel4Id
+    );
+    
+    console.log(`🏷️ [transformExistingInvoiceToFBRFormat] HS Code for item ${i + 1}:`, hsCode);
+    
+    // Calculate total discount for this item
+    const totalDiscount = item.discountBreakdown?.reduce((sum, d) => sum + d.value, 0) || 0;
+    // Calculate total tax for this item
+    const totalTax = item.taxBreakdown?.reduce((sum, t) => sum + t.value, 0) || 0;
+    // Use the stored isExempted value from the item
+    const isExempted = item.isExempted || false;
+    // Set rate and sale type based on exemption status
+    let rate = "0%";
+    let saleType = "Taxable goods";
+    if (isExempted) {
+      rate = "Exempt";
+      saleType = "Exempt goods";
+    } else {
+      // Get tax rate percentage (first tax rate)
+      rate = item.taxBreakdown && item.taxBreakdown.length > 0
+        ? `${item.taxBreakdown[0].registeredValue || item.taxBreakdown[0].unregisteredValue}%`
+        : '0%';
+    }
+    transformedItems.push({
+      hsCode: hsCode,
+      productDescription: item.productName || '',
+      rate: rate,
+      uoM: 'KG',
+      quantity: item.quantity,
+      totalValues: item.netAmount,
+      valueSalesExcludingST: item.netAmount - totalTax || 0,
+      fixedNotifiedValueOrRetailPrice: 0,
+      salesTaxApplicable: totalTax,
+      salesTaxWithheldAtSource: 0,
+      extraTax: "",
+      furtherTax: 0,
+      sroScheduleNo: "6th Schd Table I",
+      fedPayable: 0,
+      discount: totalDiscount,
+      saleType: saleType,
+      sroItemSerialNo: "100",
+      isExempted: isExempted
+    });
+  }
+  
+  const fbrInvoiceData = {
+    invoiceType: invoice.invoiceType,
+    invoiceDate: formattedInvoiceDate,
+    sellerBusinessName: sellerBusinessName,
+    sellerProvince: "Punjab",
+    sellerNTNCNIC: sellerNTNCNIC,
+    sellerAddress: sellerAddress,
+    buyerNTNCNIC: buyerNTNCNIC,
+    buyerBusinessName: buyerBusinessName,
+    buyerProvince: "Punjab",
+    buyerAddress: buyerAddress,
+    invoiceRefNo: invoice.invoiceNumber,
+    scenarioId: "SN006",
+    buyerRegistrationType: buyerRegistrationType,
+    items: transformedItems
+  };
+  
+  console.log('🚀 [transformExistingInvoiceToFBRFormat] Final FBR invoice data:', JSON.stringify(fbrInvoiceData, null, 2));
+  return fbrInvoiceData;
+};
+
+
+const FbrResponseModal = () => {
+  if (!showFbrResponseModal || !fbrResponse) return null;
+
+  // Check if response is an error
+  const isError = fbrResponse.error || fbrResponse.status >= 400;
+
+  return (
+    <AnimatePresence>
+      {showFbrResponseModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+          onClick={() => setShowFbrResponseModal(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.9, y: 20 }}
+            className="lg:ml-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-xl font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                {isError ? (
+                  <>
+                    <XCircle className="w-5 h-5 text-red-500" />
+                    FBR Invoice Error
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-5 h-5 text-green-500" />
+                    FBR Invoice Response
+                  </>
+                )}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowFbrResponseModal(false)}
+                className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <X className="w-6 h-6 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              {/* Status Section */}
+              <div className={`mb-6 p-4 rounded-lg border ${
+                isError 
+                  ? 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-700' 
+                  : 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-700'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {isError ? (
+                    <XCircle className="w-6 h-6 text-red-500" />
+                  ) : (
+                    <CheckCircle2 className="w-6 h-6 text-green-500" />
+                  )}
+                  <h4 className="text-lg font-medium">
+                    {isError 
+                      ? `Error: ${fbrResponse.statusText || 'Failed to post invoice'}`
+                      : 'Invoice Successfully Posted to FBR'
+                    }
+                  </h4>
+                </div>
+                {fbrResponse.status && (
+                  <p className="mt-2">
+                    <span className="font-medium">HTTP Status:</span> {fbrResponse.status} {fbrResponse.statusText}
+                  </p>
+                )}
+                {fbrResponse.message && (
+                  <p className="mt-2">
+                    <span className="font-medium">Message:</span> {fbrResponse.message}
+                  </p>
+                )}
+              </div>
+
+              {/* FBR Invoice Number (only for success) */}
+              {!isError && fbrResponse.fbrInvoiceNumber && (
+                <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
+                  <h4 className="text-md font-medium text-blue-800 dark:text-blue-200 mb-2">
+                    FBR Invoice Number
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {fbrResponse.fbrInvoiceNumber}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(fbrResponse.fbrInvoiceNumber);
+                        setMessage({ type: "success", text: "FBR Invoice Number copied to clipboard!" });
+                      }}
+                      className="p-2 rounded hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Response Details */}
+              <div className="mb-6">
+                <h4 className="text-md font-medium text-gray-800 dark:text-gray-200 mb-2">
+                  Full Response Details
+                </h4>
+                <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg overflow-auto max-h-96">
+                  <pre className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+                    {JSON.stringify(fbrResponse, null, 2)}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Request Payload (for debugging) */}
+              <div className="mb-6">
+                <h4 className="text-md font-medium text-gray-800 dark:text-gray-200 mb-2">
+                  Request Payload Sent to FBR
+                </h4>
+                <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg overflow-auto max-h-60">
+                  <pre className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+                    {JSON.stringify(transformExistingInvoiceToFBRFormat(existingInvoiceData), null, 2)}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Print the response
+                    const printContent = `
+                      <html>
+                        <head>
+                          <title>FBR Invoice Response</title>
+                          <style>
+                            body { font-family: Arial, sans-serif; padding: 20px; }
+                            .header { text-align: center; margin-bottom: 30px; }
+                            .status { padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+                            .error { background-color: #fee; color: #c33; }
+                            .success { background-color: #efe; color: #3c3; }
+                            .invoice-number { font-size: 24px; font-weight: bold; color: #2563eb; margin: 20px 0; }
+                            .response { background: #f3f4f6; padding: 15px; border-radius: 8px; }
+                            pre { white-space: pre-wrap; font-size: 12px; }
+                          </style>
+                        </head>
+                        <body>
+                          <div class="header">
+                            <h1>FBR Invoice Response</h1>
+                            <div class="status ${isError ? 'error' : 'success'}">
+                              <h2>${isError ? 'Error' : 'Success'}</h2>
+                              <p>Status: ${fbrResponse.status} ${fbrResponse.statusText}</p>
+                              <p>Message: ${fbrResponse.message}</p>
+                            </div>
+                            ${!isError && fbrResponse.fbrInvoiceNumber ? 
+                              `<div class="invoice-number">FBR Invoice Number: ${fbrResponse.fbrInvoiceNumber}</div>` : 
+                              ''}
+                          </div>
+                          <div class="response">
+                            <h3>Full Response:</h3>
+                            <pre>${JSON.stringify(fbrResponse, null, 2)}</pre>
+                          </div>
+                        </body>
+                      </html>
+                    `;
+                    const printWindow = window.open('', '_blank');
+                    printWindow.document.write(printContent);
+                    printWindow.document.close();
+                  }}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                  Print Response
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFbrResponseModal(false)}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+const validateInvoiceWithFBR = async () => {
+  if (!companyId) {
+    setMessage({ type: "error", text: "Company ID is required" });
+    return;
+  }
+  if (items.length === 0) {
+    setMessage({ type: "error", text: "No items to validate" });
+    return;
+  }
+  setValidating(true);
+  setMessage(null);
+  try {
+    // Get FBR token
+    let token = fbrToken;
+    if (!token) {
+      token = await fetchFbrToken();
+      if (!token) {
+        setMessage({ type: "error", text: "Failed to get FBR token" });
+        setValidating(false);
+        return;
+      }
+    }
+    // Transform invoice data
+    const fbrInvoiceData = await transformInvoiceToFBRFormat();
+    console.log('FBR Invoice Data:', fbrInvoiceData);
+    // Call FBR validation API
+    const response = await fetch("https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(fbrInvoiceData)
+    });
+    const result = await response.json();
+    if (response.ok) {
+      setValidationResult({
+        success: true,
+        message: "Invoice validated successfully with FBR",
+        data: result
+      });
+    } else {
       setValidationResult({
         success: false,
-        message: err.message || "Error validating invoice with FBR"
+        message: result.message || "Invoice validation failed",
+        data: result
       });
-      setShowValidationModal(true);
-    } finally {
-      setValidating(false);
     }
-  };
+    setShowValidationModal(true);
+  } catch (err) {
+    console.error('Error validating invoice with FBR:', err);
+    setValidationResult({
+      success: false,
+      message: err.message || "Error validating invoice with FBR"
+    });
+    setShowValidationModal(true);
+  } finally {
+    setValidating(false);
+  }
+};
+
 
   // Fetch godowns
   useEffect(() => {
@@ -1443,28 +2229,52 @@ useEffect(() => {
     fetchFinishedGoods();
   }, [companyId]);
 
-  // Fetch account level 4 based on selected finished good
-  useEffect(() => {
-    const fetchAccountLevel4s = async () => {
-      if (!companyId || !selectedFinishedGood) return;
-      const selectedGood = finishedGoods.find(fg => fg._id === selectedFinishedGood);
-      if (!selectedGood) return;
-      setLoading(true);
-      try {
-        const response = await fetch(
-          `http://localhost:5000/api/item-profile/${companyId}/account-level4?finishedGoodCode=${selectedGood.code}`
-        );
-        if (!response.ok) throw new Error('Failed to fetch account level 4');
-        const data = await response.json();
-        setAccountLevel4s(data.accounts);
-      } catch (err) {
-        setMessage({ type: "error", text: err.message || 'Failed to fetch account level 4' });
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchAccountLevel4s();
-  }, [selectedFinishedGood, companyId, finishedGoods]);
+useEffect(() => {
+  const fetchAccountLevel4s = async () => {
+    if (!companyId || !selectedFinishedGood) return;
+    const selectedGood = finishedGoods.find(fg => fg._id === selectedFinishedGood);
+    if (!selectedGood) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/item-profile/${companyId}/account-level4?finishedGoodCode=${selectedGood.code}`
+      );
+      if (!response.ok) throw new Error('Failed to fetch account level 4');
+      const data = await response.json();
+      console.log('📊 [fetchAccountLevel4s] API response:', data);
+      
+      // For each account level 4, try to fetch the HS code
+      const accountLevel4sWithHS = await Promise.all(
+        data.accounts.map(async (account) => {
+          try {
+            const hsCodeResponse = await fetch(
+              `http://localhost:5000/api/item-profile/${companyId}/hs-code?finishedGoodId=${selectedFinishedGood}&accountLevel4Id=${account._id}`
+            );
+            const hsCodeData = await hsCodeResponse.json();
+            return {
+              ...account,
+              hsCode: hsCodeData.hsCode || ''
+            };
+          } catch (err) {
+            console.error('Error fetching HS code for account:', err);
+            return {
+              ...account,
+              hsCode: ''
+            };
+          }
+        })
+      );
+      
+      setAccountLevel4s(accountLevel4sWithHS);
+    } catch (err) {
+      console.error('❌ [fetchAccountLevel4s] Error:', err);
+      setMessage({ type: "error", text: err.message || 'Failed to fetch account level 4' });
+    } finally {
+      setLoading(false);
+    }
+  };
+  fetchAccountLevel4s();
+}, [selectedFinishedGood, companyId, finishedGoods]);
 
   // Fetch unit measurements
   useEffect(() => {
@@ -1927,206 +2737,188 @@ useEffect(() => {
     fetchInvoices();
   }, [showInvoicesModal, companyId]);
 
-  const fetchInvoiceByNumber = async () => {
-    if (!searchInvoiceNumber || !companyId) return;
-    setIsSearchingInvoice(true);
-    setIsDataLoading(true);
-    setMessage(null);
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/sales-vouchers/${companyId}/search/?invoiceNumber=${searchInvoiceNumber}`
-      );
-      if (!response.ok) {
-        if (response.status === 404) {
-          setMessage({ type: "error", text: "Invoice not found" });
-          return;
-        }
-        throw new Error('Failed to fetch invoice');
+const fetchInvoiceByNumber = async () => {
+  if (!searchInvoiceNumber || !companyId) return;
+  setIsSearchingInvoice(true);
+  setIsDataLoading(true);
+  setMessage(null);
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/sales-vouchers/${companyId}/search/?invoiceNumber=${searchInvoiceNumber}`
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        setMessage({ type: "error", text: "Invoice not found" });
+        return;
       }
-      const data = await response.json();
-      setExistingInvoiceData(data);
-      setIsEditingInvoice(true);
-      setIsInvoicePosted(data.isPosted || false); // Set the posted status
+      throw new Error('Failed to fetch invoice');
+    }
+    const data = await response.json();
+    setExistingInvoiceData(data);
+    setIsEditingInvoice(true);
+    setIsInvoicePosted(data.isPosted || false); // Set the posted status
 
-
-      // Populate all form fields with existing invoice data
-      setInvoiceType(data.invoiceType);
-      setInvoiceNumber(data.invoiceNumber);
-      setInvoiceDate(new Date(data.invoiceDate).toISOString().split('T')[0]);
-      setfbrInvoiceNumber(data.fbrInvoiceNumber || '');
-
-      // Fix: Use customerAddress instead of address
-      setAddress(data.customerAddress || '');
-
-      setPoNumber(data.poNumber || '');
-      setPoDate(data.poDate ? new Date(data.poDate).toISOString().split('T')[0] :
-        new Date().toISOString().split('T')[0]);
-      setOgpNumber(data.ogpNumber || '');
-      setOgpDate(data.ogpDate ? new Date(data.ogpDate).toISOString().split('T')[0] :
-        new Date().toISOString().split('T')[0]);
-      setDcNumber(data.dcNumber || '');
-      setDcDate(data.dcDate ? new Date(data.dcDate).toISOString().split('T')[0] :
-        new Date().toISOString().split('T')[0]);
-      setVehicleNumber(data.vehicleNumber || '');
-      setRemarks(data.remarks || '');
-
-      // Set debtor account and sub account
-      setSelectedDebtorAccount(
-        data.debtorAccount?._id ||
-        (typeof data.debtorAccount === 'string' ? data.debtorAccount :
-          (data.debtorAccountId || ''))
-      );
-      setSelectedSubAccount(
-        data.subAccount?._id ||
-        (typeof data.subAccount === 'string' ? data.subAccount :
-          (data.subAccountId || ''))
-      );
-
-      // Set parent and child centers
-      setSelectedParentCenter(
-        data.parentCenterId?._id ||
-        (typeof data.parentCenterId === 'string' ? data.parentCenterId : '')
-      );
-      setSelectedChildCenter(
-        data.childCenterId?._id ||
-        (typeof data.childCenterId === 'string' ? data.childCenterId : '')
-      );
-
-      // Set GoDown ID
-      const goDownId = data.goDownId?._id || (typeof data.goDownId === 'string' ? data.goDownId : '');
-      setSelectedGoDown(goDownId);
-
-      // Ensure GoDowns are loaded if not already
-      if (goDowns.length === 0) {
-        try {
-          const goDownResponse = await fetch(`http://localhost:5000/api/godown/${companyId}`);
-          if (goDownResponse.ok) {
-            const goDownData = await goDownResponse.json();
-            setGoDowns(goDownData);
-          }
-        } catch (err) {
-          console.error('Error fetching godowns:', err);
-        }
-      }
-
-      // Ensure unit measurements are loaded if not already
-      if (unitMeasurements.length === 0) {
-        try {
-          const unitResponse = await fetch(`http://localhost:5000/api/unit-measurement/${companyId}`);
-          if (unitResponse.ok) {
-            const unitData = await unitResponse.json();
-            setUnitMeasurements(unitData);
-          }
-        } catch (err) {
-          console.error('Error fetching unit measurements:', err);
-        }
-      }
-
-      // Set items from the invoice data with proper unit measurement mapping
-      const mappedItems = data.items.map(item => {
-        // Get unit measurement ID from various possible sources
-        const unitMeasurementId = item.unitMeasurementId?._id ||
-          item.unitMeasurementId ||
-          (item.unitMeasurement && typeof item.unitMeasurement === 'object' ? item.unitMeasurement._id : null);
-
-        // Get unit measurement title and code from various possible sources
-        let unitMeasurementTitle = item.unitMeasurementId?.title ||
-          item.unitMeasurementTitle ||
-          (item.unitMeasurement && typeof item.unitMeasurement === 'object' ? item.unitMeasurement.title : '');
-
-        let unitMeasurementCode = item.unitMeasurementId?.code ||
-          item.unitMeasurementCode ||
-          (item.unitMeasurement && typeof item.unitMeasurement === 'object' ? item.unitMeasurement.code : '');
-
-        // If we still don't have title/code, try to find in unitMeasurements state
-        if ((!unitMeasurementTitle || !unitMeasurementCode) && unitMeasurementId) {
-          const unit = unitMeasurements.find(um => um._id === unitMeasurementId);
-          if (unit) {
-            unitMeasurementTitle = unit.title;
-            unitMeasurementCode = unit.code;
-          }
-        }
-
-        return {
-          ...item,
-          finishedGoodId: item.finishedGoodId?._id || item.finishedGoodId,
-          finishedGoodCode: item.finishedGoodId?.code || item.finishedGoodCode || '',
-          finishedGoodTitle: item.finishedGoodId?.title || item.finishedGoodTitle || '',
-          accountLevel4Id: item.accountLevel4Id?._id || item.accountLevel4Id,
-          unitMeasurementId,
-          quantity: item.quantity,
-          rate: item.rate,
-          amount: item.amount,
-          netAmountBeforeTax: item.netAmountBeforeTax,
-          netAmount: item.netAmount,
-          discountBreakdown: item.discountBreakdown,
-          taxBreakdown: item.taxBreakdown,
-          productName: item.productName,
-          unitMeasurementCode: unitMeasurementCode || '',
-          unitMeasurementTitle: unitMeasurementTitle || ''
-        };
-      });
-      setItems(mappedItems);
-
-      // If there are items, set quantity from the first item
-      if (mappedItems.length > 0) {
-        setQuantity(mappedItems[0].quantity);
-
-        // Also set the unit measurement for the first item in the form
-        if (mappedItems[0].unitMeasurementId) {
-          setSelectedUnitMeasurement(mappedItems[0].unitMeasurementId);
-        }
-      }
-
-      // Fetch finished goods and account level 4 data
+    // Populate all form fields with existing invoice data
+    setInvoiceType(data.invoiceType);
+    setInvoiceNumber(data.invoiceNumber);
+    setInvoiceDate(new Date(data.invoiceDate).toISOString().split('T')[0]);
+    // Make sure to set the FBR invoice number from the loaded data
+    setfbrInvoiceNumber(data.fbrInvoiceNumber || '');
+    // Fix: Use customerAddress instead of address
+    setAddress(data.customerAddress || '');
+    setPoNumber(data.poNumber || '');
+    setPoDate(data.poDate ? new Date(data.poDate).toISOString().split('T')[0] :
+      new Date().toISOString().split('T')[0]);
+    setOgpNumber(data.ogpNumber || '');
+    setOgpDate(data.ogpDate ? new Date(data.ogpDate).toISOString().split('T')[0] :
+      new Date().toISOString().split('T')[0]);
+    setDcNumber(data.dcNumber || '');
+    setDcDate(data.dcDate ? new Date(data.dcDate).toISOString().split('T')[0] :
+      new Date().toISOString().split('T')[0]);
+    setVehicleNumber(data.vehicleNumber || '');
+    setRemarks(data.remarks || '');
+    // Set debtor account and sub account
+    setSelectedDebtorAccount(
+      data.debtorAccount?._id ||
+      (typeof data.debtorAccount === 'string' ? data.debtorAccount :
+        (data.debtorAccountId || ''))
+    );
+    setSelectedSubAccount(
+      data.subAccount?._id ||
+      (typeof data.subAccount === 'string' ? data.subAccount :
+        (data.subAccountId || ''))
+    );
+    // Set parent and child centers
+    setSelectedParentCenter(
+      data.parentCenterId?._id ||
+      (typeof data.parentCenterId === 'string' ? data.parentCenterId : '')
+    );
+    setSelectedChildCenter(
+      data.childCenterId?._id ||
+      (typeof data.childCenterId === 'string' ? data.childCenterId : '')
+    );
+    // Set GoDown ID
+    const goDownId = data.goDownId?._id || (typeof data.goDownId === 'string' ? data.goDownId : '');
+    setSelectedGoDown(goDownId);
+    // Ensure GoDowns are loaded if not already
+    if (goDowns.length === 0) {
       try {
-        // Fetch finished goods if not already loaded
-        if (finishedGoods.length === 0) {
-          const fgResponse = await fetch(`http://localhost:5000/api/item-profile/finished-goods/${companyId}`);
-          if (fgResponse.ok) {
-            const fgData = await fgResponse.json();
-            setFinishedGoods(fgData);
-          }
+        const goDownResponse = await fetch(`http://localhost:5000/api/godown/${companyId}`);
+        if (goDownResponse.ok) {
+          const goDownData = await goDownResponse.json();
+          setGoDowns(goDownData);
         }
-
-        // Set finished good from invoice data
-        if (data.finishedGoodId) {
-          const fgId = data.finishedGoodId._id || data.finishedGoodId;
-          setSelectedFinishedGood(fgId);
-
-          // Fetch account level 4 data for this finished good
-          const selectedGood = finishedGoods.find(fg => fg._id === fgId) ||
-            (data.finishedGoodId.code ? { code: data.finishedGoodId.code } : null);
-
-          if (selectedGood && selectedGood.code) {
-            const al4Response = await fetch(
-              `http://localhost:5000/api/item-profile/${companyId}/account-level4?finishedGoodCode=${selectedGood.code}`
-            );
-            if (al4Response.ok) {
-              const al4Data = await al4Response.json();
-              setAccountLevel4s(al4Data.accounts);
-
-              // Set account level 4 from invoice data
-              if (data.accountLevel4Id) {
-                const al4Id = data.accountLevel4Id._id || data.accountLevel4Id;
-                setSelectedAccountLevel4(al4Id);
-              }
+      } catch (err) {
+        console.error('Error fetching godowns:', err);
+      }
+    }
+    // Ensure unit measurements are loaded if not already
+    if (unitMeasurements.length === 0) {
+      try {
+        const unitResponse = await fetch(`http://localhost:5000/api/unit-measurement/${companyId}`);
+        if (unitResponse.ok) {
+          const unitData = await unitResponse.json();
+          setUnitMeasurements(unitData);
+        }
+      } catch (err) {
+        console.error('Error fetching unit measurements:', err);
+      }
+    }
+    // Set items from the invoice data with proper unit measurement mapping
+    const mappedItems = data.items.map(item => {
+      // Get unit measurement ID from various possible sources
+      const unitMeasurementId = item.unitMeasurementId?._id ||
+        item.unitMeasurementId ||
+        (item.unitMeasurement && typeof item.unitMeasurement === 'object' ? item.unitMeasurement._id : null);
+      // Get unit measurement title and code from various possible sources
+      let unitMeasurementTitle = item.unitMeasurementId?.title ||
+        item.unitMeasurementTitle ||
+        (item.unitMeasurement && typeof item.unitMeasurement === 'object' ? item.unitMeasurement.title : '');
+      let unitMeasurementCode = item.unitMeasurementId?.code ||
+        item.unitMeasurementCode ||
+        (item.unitMeasurement && typeof item.unitMeasurement === 'object' ? item.unitMeasurement.code : '');
+      // If we still don't have title/code, try to find in unitMeasurements state
+      if ((!unitMeasurementTitle || !unitMeasurementCode) && unitMeasurementId) {
+        const unit = unitMeasurements.find(um => um._id === unitMeasurementId);
+        if (unit) {
+          unitMeasurementTitle = unit.title;
+          unitMeasurementCode = unit.code;
+        }
+      }
+      return {
+        ...item,
+        finishedGoodId: item.finishedGoodId?._id || item.finishedGoodId,
+        finishedGoodCode: item.finishedGoodId?.code || item.finishedGoodCode || '',
+        finishedGoodTitle: item.finishedGoodId?.title || item.finishedGoodTitle || '',
+        accountLevel4Id: item.accountLevel4Id?._id || item.accountLevel4Id,
+        unitMeasurementId,
+        quantity: item.quantity,
+        rate: item.rate,
+        amount: item.amount,
+        netAmountBeforeTax: item.netAmountBeforeTax,
+        netAmount: item.netAmount,
+        discountBreakdown: item.discountBreakdown,
+        taxBreakdown: item.taxBreakdown,
+        productName: item.productName,
+        unitMeasurementCode: unitMeasurementCode || '',
+        unitMeasurementTitle: unitMeasurementTitle || '',
+        // Ensure FBR invoice number is included in each item
+        fbrInvoiceNumber: item.fbrInvoiceNumber || data.fbrInvoiceNumber || ''
+      };
+    });
+    setItems(mappedItems);
+    // If there are items, set quantity from the first item
+    if (mappedItems.length > 0) {
+      setQuantity(mappedItems[0].quantity);
+      // Also set the unit measurement for the first item in the form
+      if (mappedItems[0].unitMeasurementId) {
+        setSelectedUnitMeasurement(mappedItems[0].unitMeasurementId);
+      }
+    }
+    // Fetch finished goods and account level 4 data
+    try {
+      // Fetch finished goods if not already loaded
+      if (finishedGoods.length === 0) {
+        const fgResponse = await fetch(`http://localhost:5000/api/item-profile/finished-goods/${companyId}`);
+        if (fgResponse.ok) {
+          const fgData = await fgResponse.json();
+          setFinishedGoods(fgData);
+        }
+      }
+      // Set finished good from invoice data
+      if (data.finishedGoodId) {
+        const fgId = data.finishedGoodId._id || data.finishedGoodId;
+        setSelectedFinishedGood(fgId);
+        // Fetch account level 4 data for this finished good
+        const selectedGood = finishedGoods.find(fg => fg._id === fgId) ||
+          (data.finishedGoodId.code ? { code: data.finishedGoodId.code } : null);
+        if (selectedGood && selectedGood.code) {
+          const al4Response = await fetch(
+            `http://localhost:5000/api/item-profile/${companyId}/account-level4?finishedGoodCode=${selectedGood.code}`
+          );
+          if (al4Response.ok) {
+            const al4Data = await al4Response.json();
+            setAccountLevel4s(al4Data.accounts);
+            // Set account level 4 from invoice data
+            if (data.accountLevel4Id) {
+              const al4Id = data.accountLevel4Id._id || data.accountLevel4Id;
+              setSelectedAccountLevel4(al4Id);
             }
           }
         }
-      } catch (err) {
-        console.error('Error fetching product data:', err);
-        setMessage({ type: "error", text: "Error loading product data" });
       }
-
-      setMessage({ type: "success", text: "Invoice loaded successfully" });
     } catch (err) {
-      setMessage({ type: "error", text: err.message || 'Failed to fetch invoice' });
-    } finally {
-      setIsSearchingInvoice(false);
-      setIsDataLoading(false);
+      console.error('Error fetching product data:', err);
+      setMessage({ type: "error", text: "Error loading product data" });
     }
-  };
+    setMessage({ type: "success", text: "Invoice loaded successfully" });
+  } catch (err) {
+    setMessage({ type: "error", text: err.message || 'Failed to fetch invoice' });
+  } finally {
+    setIsSearchingInvoice(false);
+    setIsDataLoading(false);
+  }
+};
 
 
   const handleViewInvoicesClick = () => {
@@ -2327,70 +3119,67 @@ useEffect(() => {
   );
 
 
-  const createVoucherFromForm = () => {
-    // Get the HS Code for the selected account level 4
-    const selectedAccountLevel4Obj = accountLevel4s.find(al4 => al4._id === selectedAccountLevel4);
-    const hsCode = selectedAccountLevel4Obj?.hsCode || '';
-    return {
-      goDownId: selectedGoDown,
-      invoiceType,
-      invoiceNumber,
-      invoiceDate,
-      fbrInvoiceNumber,
-      debtorAccountId: selectedDebtorAccount,
-      subAccountId: selectedSubAccount,
-      parentCenterId: selectedParentCenter,
-      childCenterId: selectedChildCenter,
-      finishedGoodId: selectedFinishedGood,
-      accountLevel4Id: selectedAccountLevel4,
-      unitMeasurementId: selectedUnitMeasurement,
-      items: [{
-        productId: selectedAccountLevel4 || '',
-        productName: selectedAccountLevel4 ? getSelectedAccountLevel4Name() : '',
-        quantity,
-        rate,
-        discount: amount - netAmountBeforeTax,
-        amount: netAmountBeforeTax,
-        tax: netAmount - netAmountBeforeTax,
-        netAmount,
-        unitMeasurementId: selectedUnitMeasurement || '',
-        unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
-        unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
-        discountBreakdown: discountBreakdown.map(d => ({
-          title: d.title,
-          type: d.type,
-          rate: d.rate,
-          value: d.value,
-          isEdited: editableDiscounts[d.discountTypeId] || false,
-          originalValue: d.originalValue,
-          discountTypeId: d.discountTypeId
-        })),
-        taxBreakdown: taxBreakdown.map(t => ({
-          title: t.title,
-          rate: customerProfile?.customerType === 'registered' ? t.registeredValue : t.unregisteredValue,
-          value: t.value,
-          isEdited: editableTaxes[t.taxTypeId] || false,
-          originalValue: t.originalValue,
-          taxTypeId: t.taxTypeId,
-          transactionType: t.transactionType || 'sale',
-          registeredValue: t.registeredValue,
-          unregisteredValue: t.unregisteredValue
-        })),
-        rateInfo: rateInfo ? {
-          applicableDate: rateInfo.applicableDate,
-          isActive: rateInfo.isActive,
-          isFallbackRate: rateInfo.isFallbackRate || false
-        } : null,
-        hsCode // Add the HS Code to each item
-      }],
-      totalAmount: amount,
-      discountAmount: amount - netAmountBeforeTax,
-      taxAmount: netAmount - netAmountBeforeTax,
-      netAmount: netAmount,
-      netAmountBeforeTax: netAmountBeforeTax,
-      customerProfile
-    };
+const createVoucherFromForm = () => {
+  return {
+    goDownId: selectedGoDown,
+    invoiceType,
+    invoiceNumber,
+    invoiceDate,
+    fbrInvoiceNumber,
+    debtorAccountId: selectedDebtorAccount,
+    subAccountId: selectedSubAccount,
+    parentCenterId: selectedParentCenter,
+    childCenterId: selectedChildCenter,
+    finishedGoodId: selectedFinishedGood,
+    accountLevel4Id: selectedAccountLevel4,
+    unitMeasurementId: selectedUnitMeasurement,
+    items: [{
+      productId: selectedAccountLevel4 || '',
+      productName: selectedAccountLevel4 ? getSelectedAccountLevel4Name() : '',
+      quantity,
+      rate,
+      discount: amount - netAmountBeforeTax,
+      amount: netAmountBeforeTax,
+      tax: netAmount - netAmountBeforeTax,
+      netAmount,
+      unitMeasurementId: selectedUnitMeasurement || '',
+      unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
+      unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
+      discountBreakdown: discountBreakdown.map(d => ({
+        title: d.title,
+        type: d.type,
+        rate: d.rate,
+        value: d.value,
+        isEdited: editableDiscounts[d.discountTypeId] || false,
+        originalValue: d.originalValue,
+        discountTypeId: d.discountTypeId
+      })),
+      taxBreakdown: taxBreakdown.map(t => ({
+        title: t.title,
+        rate: customerProfile?.customerType === 'registered' ? t.registeredValue : t.unregisteredValue,
+        value: t.value,
+        isEdited: editableTaxes[t.taxTypeId] || false,
+        originalValue: t.originalValue,
+        taxTypeId: t.taxTypeId,
+        transactionType: t.transactionType || 'sale',
+        registeredValue: t.registeredValue,
+        unregisteredValue: t.unregisteredValue
+      })),
+      rateInfo: rateInfo ? {
+        applicableDate: rateInfo.applicableDate,
+        isActive: rateInfo.isActive,
+        isFallbackRate: rateInfo.isFallbackRate || false
+      } : null,
+      // Removed hsCode field - will be fetched by backend
+    }],
+    totalAmount: amount,
+    discountAmount: amount - netAmountBeforeTax,
+    taxAmount: netAmount - netAmountBeforeTax,
+    netAmount: netAmount,
+    netAmountBeforeTax: netAmountBeforeTax,
+    customerProfile
   };
+};
 
   const resetForm = () => {
     // Don't reset these fields when editing an invoice
@@ -2431,10 +3220,10 @@ useEffect(() => {
       setMessage({ type: "error", text: 'Quantity must be greater than 0' });
       return;
     }
-    if (rate <= 0) {
-      setMessage({ type: "error", text: 'Rate must be greater than 0' });
-      return;
-    }
+    // if (rate <= 0) {
+    //   setMessage({ type: "error", text: 'Rate must be greater than 0' });
+    //   return;
+    // }
     // Create voucher object and add to list
     const newVoucher = createVoucherFromForm();
     setVouchers([...vouchers, newVoucher]);
@@ -2450,47 +3239,96 @@ useEffect(() => {
     setVouchers(updatedVouchers);
   };
 
-  const handleDeleteItem = async (index) => {
-
-      if (isInvoicePosted) {
-      setMessage({ type: "error", text: "This invoice is posted and cannot be deleted." });
-      return;
-    }
-
-    if (!companyId || !items[index]?._id) {
-      setMessage({ type: "error", text: "Unable to delete item - missing required information" });
-      return;
-    }
-    try {
-      setLoading(true);
-      // Make API call to delete the item
-      const response = await fetch(
-        `http://localhost:5000/api/sales-vouchers/${companyId}/items/${items[index]._id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json'
+const handleDeleteItem = async (index) => {
+  if (isInvoicePosted) {
+    setMessage({ type: "error", text: "This invoice is posted and cannot be deleted." });
+    return;
+  }
+  
+  if (!companyId) {
+    setMessage({ type: "error", text: "Company ID is required" });
+    return;
+  }
+  
+  try {
+    setLoading(true);
+    
+    // If we're editing an existing invoice, we need to update it in the database
+    if (existingInvoiceData && existingInvoiceData._id) {
+      const invoiceId = existingInvoiceData._id.$oid || existingInvoiceData._id;
+      
+      console.log('🗑️ [handleDeleteItem] Deleting item from existing invoice:', {
+        invoiceId,
+        itemIndex: index,
+        itemId: items[index]?._id
+      });
+      
+      // Create a new items array without the item to delete
+      const updatedItems = items.filter((_, i) => i !== index);
+      
+      // If there are no items left, delete the entire invoice
+      if (updatedItems.length === 0) {
+        console.log('🗑️ [handleDeleteItem] No items left, deleting entire invoice');
+        
+        const response = await fetch(
+          `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json'
+            }
           }
+        );
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to delete invoice');
         }
-      );
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete item');
-      }
-      const result = await response.json();
-      if (result.deletedVoucher) {
-        // If the entire voucher was deleted, reset the form
+        
+        // Reset form and state
         setItems([]);
         resetForm();
-        setMessage({ type: "success", text: "Voucher deleted successfully as it had no remaining items" });
+        setIsEditingItem(false);
+        setIsEditingInvoice(false);
+        setEditingItemIndex(null);
+        setExistingInvoiceData(null);
+        
+        setMessage({ type: "success", text: "Invoice deleted successfully as it had no remaining items" });
       } else {
-        // Create a new array without the deleted item
-        const updatedItems = [...items];
-        updatedItems.splice(index, 1);
-        // Update the state with the new array
+        // Update the invoice with the new items array
+        console.log('🗑️ [handleDeleteItem] Updating invoice with remaining items:', updatedItems.length);
+        
+        const response = await fetch(
+          `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}`,
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ...existingInvoiceData,
+              items: updatedItems,
+              // Recalculate totals
+              totalAmount: updatedItems.reduce((sum, item) => sum + (item.amount || 0), 0),
+              discountAmount: updatedItems.reduce((sum, item) => sum + (item.discount || 0), 0),
+              taxAmount: updatedItems.reduce((sum, item) => sum + (item.tax || 0), 0),
+              netAmount: updatedItems.reduce((sum, item) => sum + (item.netAmount || 0), 0),
+              netAmountBeforeTax: updatedItems.reduce((sum, item) => sum + (item.netAmountBeforeTax || 0), 0)
+            })
+          }
+        );
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to update invoice');
+        }
+        
+        const updatedInvoice = await response.json();
+        
+        // Update local state
         setItems(updatedItems);
-        // Show success message
-        setMessage({ type: "success", text: "Item deleted successfully" });
+        setExistingInvoiceData(updatedInvoice);
+        
         // If we're deleting the item currently being edited, reset the form
         if (isEditingItem && editingItemIndex === index) {
           resetForm();
@@ -2500,13 +3338,36 @@ useEffect(() => {
           // Adjust the editing index if we deleted an item before it
           setEditingItemIndex(editingItemIndex - 1);
         }
+        
+        setMessage({ type: "success", text: "Item deleted successfully" });
       }
-    } catch (err) {
-      setMessage({ type: "error", text: err.message || 'Failed to delete item' });
-    } finally {
-      setLoading(false);
+    } else {
+      // If it's a new invoice (not yet saved), just remove the item from local state
+      console.log('🗑️ [handleDeleteItem] Removing item from new invoice');
+      
+      const updatedItems = [...items];
+      updatedItems.splice(index, 1);
+      setItems(updatedItems);
+      
+      // If we're deleting the item currently being edited, reset the form
+      if (isEditingItem && editingItemIndex === index) {
+        resetForm();
+        setIsEditingItem(false);
+        setEditingItemIndex(null);
+      } else if (isEditingItem && editingItemIndex > index) {
+        // Adjust the editing index if we deleted an item before it
+        setEditingItemIndex(editingItemIndex - 1);
+      }
+      
+      setMessage({ type: "success", text: "Item removed successfully" });
     }
-  };
+  } catch (err) {
+    console.error('❌ [handleDeleteItem] Error:', err);
+    setMessage({ type: "error", text: err.message || 'Failed to delete item' });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const fetchSubAccountDetails = async (subAccountId) => {
     if (!companyId || !subAccountId) return { discounts: [], taxes: [] };
@@ -2633,328 +3494,329 @@ useEffect(() => {
     }
   };
 
-  const handleEditItem = async (index) => {
-    const itemToEdit = items[index];
-
-      if (isInvoicePosted) {
-      setMessage({ type: "error", text: "This invoice is posted and cannot be edited." });
-      return;
-    }
-
-    // Get the finished good ID from multiple possible sources
-    let finishedGoodId = itemToEdit.finishedGoodId;
-
-    // If not available in the item, try to get it from the product code
-    if (!finishedGoodId && itemToEdit.productCode) {
-      // Extract the finished good code from the product code
-      // For example, if productCode is "040100300001", the finished good code might be "0401003"
-      const productCodeParts = itemToEdit.productCode.split('');
-      if (productCodeParts.length >= 7) {
-        const possibleFinishedGoodCode = productCodeParts.slice(0, 7).join('');
-        const matchingFinishedGood = finishedGoods.find(fg => fg.code === possibleFinishedGoodCode);
-        if (matchingFinishedGood) {
-          finishedGoodId = matchingFinishedGood._id;
-        }
+const handleEditItem = async (index) => {
+  const itemToEdit = items[index];
+  
+  if (isInvoicePosted) {
+    setMessage({ type: "error", text: "This invoice is posted and cannot be edited." });
+    return;
+  }
+  
+  // Get the finished good ID from multiple possible sources
+  let finishedGoodId = itemToEdit.finishedGoodId;
+  // If not available in the item, try to get it from the product code
+  if (!finishedGoodId && itemToEdit.productCode) {
+    // Extract the finished good code from the product code
+    // For example, if productCode is "040100300001", the finished good code might be "0401003"
+    const productCodeParts = itemToEdit.productCode.split('');
+    if (productCodeParts.length >= 7) {
+      const possibleFinishedGoodCode = productCodeParts.slice(0, 7).join('');
+      const matchingFinishedGood = finishedGoods.find(fg => fg.code === possibleFinishedGoodCode);
+      if (matchingFinishedGood) {
+        finishedGoodId = matchingFinishedGood._id;
       }
     }
-
-    // If still not available, get it from the existing invoice data
-    if (!finishedGoodId && existingInvoiceData) {
-      finishedGoodId = existingInvoiceData.finishedGoodId?._id || existingInvoiceData.finishedGoodId;
-    }
-
-    // Check if the finished good exists in the finishedGoods array
-    const finishedGoodExists = finishedGoods.some(fg => fg._id === finishedGoodId);
-
-    // If it doesn't exist, add it to the finishedGoods array
-    if (!finishedGoodExists && finishedGoodId) {
-      try {
-        // Fetch the finished good details from the server
-        const response = await fetch(`http://localhost:5000/api/item-profile/finished-good/${finishedGoodId}`);
-        if (response.ok) {
-          const finishedGoodData = await response.json();
-          setFinishedGoods(prev => [...prev, finishedGoodData]);
-        }
-      } catch (err) {
-        console.error('Error fetching finished good:', err);
-        // If fetch fails, create a minimal entry with available data
-        setFinishedGoods(prev => [...prev, {
-          _id: finishedGoodId,
-          code: existingInvoiceData?.finishedGoodCode || itemToEdit.productCode?.substring(0, 7) || 'N/A',
-          title: existingInvoiceData?.finishedGoodTitle || itemToEdit.productName || 'Unknown Product'
-        }]);
+  }
+  // If still not available, get it from the existing invoice data
+  if (!finishedGoodId && existingInvoiceData) {
+    finishedGoodId = existingInvoiceData.finishedGoodId?._id || existingInvoiceData.finishedGoodId;
+  }
+  
+  // Get the account level 4 ID from the item (productId in the schema)
+  const accountLevel4Id = itemToEdit.productId || itemToEdit.accountLevel4Id;
+  
+  console.log('📝 [handleEditItem] Editing item:', {
+    finishedGoodId,
+    accountLevel4Id,
+    productName: itemToEdit.productName
+  });
+  
+  // Check if the finished good exists in the finishedGoods array
+  const finishedGoodExists = finishedGoods.some(fg => fg._id === finishedGoodId);
+  // If it doesn't exist, add it to the finishedGoods array
+  if (!finishedGoodExists && finishedGoodId) {
+    try {
+      // Fetch the finished good details from the server
+      const response = await fetch(`http://localhost:5000/api/item-profile/finished-good/${finishedGoodId}`);
+      if (response.ok) {
+        const finishedGoodData = await response.json();
+        setFinishedGoods(prev => [...prev, finishedGoodData]);
       }
+    } catch (err) {
+      console.error('Error fetching finished good:', err);
+      // If fetch fails, create a minimal entry with available data
+      setFinishedGoods(prev => [...prev, {
+        _id: finishedGoodId,
+        code: existingInvoiceData?.finishedGoodCode || itemToEdit.productCode?.substring(0, 7) || 'N/A',
+        title: existingInvoiceData?.finishedGoodTitle || itemToEdit.productName || 'Unknown Product'
+      }]);
     }
-
-    // Get the account level 4 ID from the item
-    const accountLevel4Id = itemToEdit.productId || itemToEdit.accountLevel4Id;
-
-    // Fetch account level 4 data for this finished good if needed
-    if (finishedGoodId && accountLevel4s.length === 0) {
-      try {
-        // Get the finished good code
-        const finishedGood = finishedGoods.find(fg => fg._id === finishedGoodId);
-        if (finishedGood && finishedGood.code) {
-          const al4Response = await fetch(
-            `http://localhost:5000/api/item-profile/${companyId}/account-level4?finishedGoodCode=${finishedGood.code}`
-          );
-          if (al4Response.ok) {
-            const al4Data = await al4Response.json();
-            setAccountLevel4s(al4Data.accounts);
-          }
+  }
+  
+  // Fetch account level 4 data for this finished good if needed
+  if (finishedGoodId && accountLevel4s.length === 0) {
+    try {
+      // Get the finished good code
+      const finishedGood = finishedGoods.find(fg => fg._id === finishedGoodId);
+      if (finishedGood && finishedGood.code) {
+        const al4Response = await fetch(
+          `http://localhost:5000/api/item-profile/${companyId}/account-level4?finishedGoodCode=${finishedGood.code}`
+        );
+        if (al4Response.ok) {
+          const al4Data = await al4Response.json();
+          setAccountLevel4s(al4Data.accounts);
         }
-      } catch (err) {
-        console.error('Error fetching account level 4 data:', err);
       }
+    } catch (err) {
+      console.error('Error fetching account level 4 data:', err);
     }
-
-    // Ensure unit measurements are loaded
-    if (unitMeasurements.length === 0) {
-      try {
-        const unitResponse = await fetch(`http://localhost:5000/api/unit-measurement/${companyId}`);
-        if (unitResponse.ok) {
-          const unitData = await unitResponse.json();
-          setUnitMeasurements(unitData);
-        }
-      } catch (err) {
-        console.error('Error fetching unit measurements:', err);
+  }
+  
+  // Ensure unit measurements are loaded
+  if (unitMeasurements.length === 0) {
+    try {
+      const unitResponse = await fetch(`http://localhost:5000/api/unit-measurement/${companyId}`);
+      if (unitResponse.ok) {
+        const unitData = await unitResponse.json();
+        setUnitMeasurements(unitData);
       }
+    } catch (err) {
+      console.error('Error fetching unit measurements:', err);
     }
-
-    // Wait a moment for state updates to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Calculate all values first
-    const quantityValue = itemToEdit.quantity || 1;
-    const rateValue = itemToEdit.rate || 0;
-    const amountValue = quantityValue * rateValue;
-    const netAmountBeforeTaxValue = itemToEdit.netAmountBeforeTax || amountValue;
-    const netAmountValue = itemToEdit.netAmount || amountValue;
-
-    // Create rate info object
-    const rateInfoValue = itemToEdit.rateInfo || {
-      rate: rateValue,
-      applicableDate: invoiceDate,
-      isActive: true,
-      isFallbackRate: false
-    };
-
-    // Set all form fields in a single batch
-    setSelectedFinishedGood(finishedGoodId || null);
-    setSelectedAccountLevel4(accountLevel4Id || null);
-    setSelectedUnitMeasurement(itemToEdit.unitMeasurementId || null);
-    setQuantity(quantityValue);
-    setRate(rateValue);
-    setAmount(amountValue);
-    setNetAmountBeforeTax(netAmountBeforeTaxValue);
-    setNetAmount(netAmountValue);
-    setRateInfo(rateInfoValue);
-    setDiscountBreakdown(itemToEdit.discountBreakdown || []);
-    setTaxBreakdown(itemToEdit.taxBreakdown || []);
-
-    // Set edit mode
-    setIsEditingItem(true);
-    setEditingItemIndex(index);
-
-    // Mark the item as being edited
-    const updatedItems = [...items];
-    updatedItems[index] = {
-      ...itemToEdit,
-      isBeingEdited: true,
-      finishedGoodId: finishedGoodId // Add the finished good ID to the item
-    };
-    setItems(updatedItems);
-
-    // Force a re-render to ensure all values are displayed
-    setTimeout(() => {
-      // This will trigger a re-render after all state updates have been processed
-      setQuantity(prev => prev);
-      setRate(prev => prev);
-    }, 50);
-
-    setMessage({ type: "success", text: "Item loaded for editing. Make changes and click 'Update Item'." });
+  }
+  
+  // Wait a moment for state updates to complete
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  // Calculate all values first
+  const quantityValue = itemToEdit.quantity || 1;
+  const rateValue = itemToEdit.rate || 0;
+  const amountValue = quantityValue * rateValue;
+  const netAmountBeforeTaxValue = itemToEdit.netAmountBeforeTax || amountValue;
+  const netAmountValue = itemToEdit.netAmount || amountValue;
+  
+  // Create rate info object
+  const rateInfoValue = itemToEdit.rateInfo || {
+    rate: rateValue,
+    applicableDate: invoiceDate,
+    isActive: true,
+    isFallbackRate: false
   };
+  
+  // Set all form fields in a single batch
+  setSelectedFinishedGood(finishedGoodId || null);
+  setSelectedAccountLevel4(accountLevel4Id || null);
+  setSelectedUnitMeasurement(itemToEdit.unitMeasurementId || null);
+  setQuantity(quantityValue);
+  setRate(rateValue);
+  setAmount(amountValue);
+  setNetAmountBeforeTax(netAmountBeforeTaxValue);
+  setNetAmount(netAmountValue);
+  setRateInfo(rateInfoValue);
+  setDiscountBreakdown(itemToEdit.discountBreakdown || []);
+  setTaxBreakdown(itemToEdit.taxBreakdown || []);
+  
+  // Set edit mode
+  setIsEditingItem(true);
+  setEditingItemIndex(index);
+  
+  // Mark the item as being edited
+  const updatedItems = [...items];
+  updatedItems[index] = {
+    ...itemToEdit,
+    isBeingEdited: true,
+    finishedGoodId: finishedGoodId, // Add the finished good ID to the item
+    productId: accountLevel4Id // Add the product ID to the item
+  };
+  setItems(updatedItems);
+  
+  // Force a re-render to ensure all values are displayed
+  setTimeout(() => {
+    // This will trigger a re-render after all state updates have been processed
+    setQuantity(prev => prev);
+    setRate(prev => prev);
+  }, 50);
+  
+  setMessage({ type: "success", text: "Item loaded for editing. Make changes and click 'Update Item'." });
+};
 
-  const handleUpdateItem = () => {
-    if (editingItemIndex === null || editingItemIndex === undefined) return;
-    // Validate form data
-    if (!selectedGoDown) {
-      setMessage({ type: "error", text: 'Please select a GoDown' });
-      return;
-    }
-    if (!selectedDebtorAccount || !selectedSubAccount) {
-      setMessage({ type: "error", text: 'Please select both a debtor account and a level 4 account' });
-      return;
-    }
-    if (quantity <= 0) {
-      setMessage({ type: "error", text: 'Quantity must be greater than 0' });
-      return;
-    }
-    if (rate <= 0) {
-      setMessage({ type: "error", text: 'Rate must be greater than 0' });
-      return;
-    }
-
-    // Create the updated item
-    const updatedItem = {
-      ...items[editingItemIndex], // Preserve existing properties like _id
-      finishedGoodId: selectedFinishedGood,
-      accountLevel4Id: selectedAccountLevel4,
-      unitMeasurementId: selectedUnitMeasurement,
+const handleUpdateItem = () => {
+  if (editingItemIndex === null || editingItemIndex === undefined) return;
+  
+  // Validate form data
+  if (!selectedGoDown) {
+    setMessage({ type: "error", text: 'Please select a GoDown' });
+    return;
+  }
+  if (!selectedDebtorAccount || !selectedSubAccount) {
+    setMessage({ type: "error", text: 'Please select both a debtor account and a level 4 account' });
+    return;
+  }
+  if (quantity <= 0) {
+    setMessage({ type: "error", text: 'Quantity must be greater than 0' });
+    return;
+  }
+  // if (rate <= 0) {
+  //   setMessage({ type: "error", text: 'Rate must be greater than 0' });
+  //   return;
+  // }
+  
+  // Create the updated item
+  const updatedItem = {
+    ...items[editingItemIndex], // Preserve existing properties like _id
+    finishedGoodId: selectedFinishedGood,
+    accountLevel4Id: selectedAccountLevel4,
+    unitMeasurementId: selectedUnitMeasurement,
+    quantity: quantity,
+    rate: rate,
+    amount: amount,
+    netAmountBeforeTax: netAmountBeforeTax,
+    netAmount: netAmount,
+    discountBreakdown: discountBreakdown.map(d => ({
+      ...d,
+      isEdited: editableDiscounts[d.discountTypeId] || false
+    })),
+    taxBreakdown: taxBreakdown.map(t => ({
+      ...t,
+      isEdited: editableTaxes[t.taxTypeId] || false
+    })),
+    rateInfo: rateInfo,
+    productName: getSelectedAccountLevel4Name(),
+    unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
+    unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
+    isEdited: true, // Mark the item as edited
+    isBeingEdited: false // No longer being edited
+    // Removed hsCode field - will be fetched by backend
+  };
+  
+  // Update the items array - only update the specific item that was edited
+  const updatedItems = [...items];
+  updatedItems[editingItemIndex] = updatedItem;
+  setItems(updatedItems);
+  
+  // If we're editing an existing invoice, update the existingInvoiceData as well
+  if (existingInvoiceData) {
+    // Create a copy of the existing items array
+    const updatedExistingItems = [...existingInvoiceData.items];
+    // Update only the specific item that was edited
+    updatedExistingItems[editingItemIndex] = {
+      ...existingInvoiceData.items[editingItemIndex],
+      // Update only the fields that were changed
+      productId: selectedAccountLevel4,
+      productName: getSelectedAccountLevel4Name(),
       quantity: quantity,
       rate: rate,
       amount: amount,
-      netAmountBeforeTax: netAmountBeforeTax,
+      discount: amount - netAmountBeforeTax,
+      tax: netAmount - netAmountBeforeTax,
       netAmount: netAmount,
-      discountBreakdown: discountBreakdown.map(d => ({
-        ...d,
-        isEdited: editableDiscounts[d.discountTypeId] || false
-      })),
-      taxBreakdown: taxBreakdown.map(t => ({
-        ...t,
-        isEdited: editableTaxes[t.taxTypeId] || false
-      })),
-      rateInfo: rateInfo,
-      productName: getSelectedAccountLevel4Name(),
+      unitMeasurementId: selectedUnitMeasurement,
       unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
       unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
-      isEdited: true, // Mark the item as edited
-      isBeingEdited: false // No longer being edited
+      discountBreakdown: discountBreakdown.map(d => ({
+        title: d.title,
+        type: d.type,
+        rate: d.rate,
+        value: d.value,
+        isEdited: editableDiscounts[d.discountTypeId] || false,
+        originalValue: d.originalValue,
+        discountTypeId: d.discountTypeId
+      })),
+      taxBreakdown: taxBreakdown.map(t => ({
+        title: t.title,
+        rate: customerProfile?.customerType === 'registered' ? t.registeredValue : t.unregisteredValue,
+        value: t.value,
+        isEdited: editableTaxes[t.taxTypeId] || false,
+        originalValue: t.originalValue,
+        taxTypeId: t.taxTypeId,
+        transactionType: t.transactionType || 'sale',
+        registeredValue: t.registeredValue,
+        unregisteredValue: t.unregisteredValue
+      })),
+      rateInfo: rateInfo ? {
+        applicableDate: rateInfo.applicableDate,
+        isActive: rateInfo.isActive,
+        isFallbackRate: rateInfo.isFallbackRate || false
+      } : null,
+      finishedGoodId: selectedFinishedGood,
+      accountLevel4Id: selectedAccountLevel4,
+      // Removed hsCode field - will be fetched by backend
     };
-
-    // Update the items array - only update the specific item that was edited
-    const updatedItems = [...items];
-    updatedItems[editingItemIndex] = updatedItem;
-    setItems(updatedItems);
-
-    // If we're editing an existing invoice, update the existingInvoiceData as well
-    if (existingInvoiceData) {
-      // Create a copy of the existing items array
-      const updatedExistingItems = [...existingInvoiceData.items];
-
-      // Update only the specific item that was edited
-      updatedExistingItems[editingItemIndex] = {
-        ...existingInvoiceData.items[editingItemIndex],
-        // Update only the fields that were changed
-        productId: selectedAccountLevel4,
-        productName: getSelectedAccountLevel4Name(),
-        quantity: quantity,
-        rate: rate,
-        amount: amount,
-        discount: amount - netAmountBeforeTax,
-        tax: netAmount - netAmountBeforeTax,
-        netAmount: netAmount,
-        unitMeasurementId: selectedUnitMeasurement,
-        unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
-        unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
-        discountBreakdown: discountBreakdown.map(d => ({
-          title: d.title,
-          type: d.type,
-          rate: d.rate,
-          value: d.value,
-          isEdited: editableDiscounts[d.discountTypeId] || false,
-          originalValue: d.originalValue,
-          discountTypeId: d.discountTypeId
-        })),
-        taxBreakdown: taxBreakdown.map(t => ({
-          title: t.title,
-          rate: customerProfile?.customerType === 'registered' ? t.registeredValue : t.unregisteredValue,
-          value: t.value,
-          isEdited: editableTaxes[t.taxTypeId] || false,
-          originalValue: t.originalValue,
-          taxTypeId: t.taxTypeId,
-          transactionType: t.transactionType || 'sale',
-          registeredValue: t.registeredValue,
-          unregisteredValue: t.unregisteredValue
-        })),
-        rateInfo: rateInfo ? {
-          applicableDate: rateInfo.applicableDate,
-          isActive: rateInfo.isActive,
-          isFallbackRate: rateInfo.isFallbackRate || false
-        } : null,
-        finishedGoodId: selectedFinishedGood,
-        accountLevel4Id: selectedAccountLevel4,
-        hsCode: existingInvoiceData.items[editingItemIndex].hsCode // Preserve the original HS Code
-      };
-
-      // Update the existingInvoiceData with the updated items
-      setExistingInvoiceData(prev => ({
-        ...prev,
-        items: updatedExistingItems,
-        // Update other fields that might have changed
-        goDownId: selectedGoDown,
-        debtorAccountId: selectedDebtorAccount,
-        subAccountId: selectedSubAccount,
-        parentCenterId: selectedParentCenter,
-        childCenterId: selectedChildCenter,
-        fbrInvoiceNumber: fbrInvoiceNumber
-        // Note: We don't recalculate totals here as they should be calculated when submitting
-      }));
-    }
-
-    setIsEditingItem(false);
-    setEditingItemIndex(null);
-    resetForm();
-    setMessage({ type: "success", text: "Item updated successfully!" });
-  };
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-      // Check if invoice is already posted
-    if (isInvoicePosted) {
-      setMessage({ type: "error", text: "This invoice is already posted and cannot be modified." });
+    
+    // Update the existingInvoiceData with the updated items
+    setExistingInvoiceData(prev => ({
+      ...prev,
+      items: updatedExistingItems,
+      // Update other fields that might have changed
+      goDownId: selectedGoDown,
+      debtorAccountId: selectedDebtorAccount,
+      subAccountId: selectedSubAccount,
+      parentCenterId: selectedParentCenter,
+      childCenterId: selectedChildCenter,
+      fbrInvoiceNumber: fbrInvoiceNumber
+      // Note: We don't recalculate totals here as they should be calculated when submitting
+    }));
+  }
+  
+  setIsEditingItem(false);
+  setEditingItemIndex(null);
+  resetForm();
+  setMessage({ type: "success", text: "Item updated successfully!" });
+};
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  // Check if invoice is already posted
+  if (isInvoicePosted) {
+    setMessage({ type: "error", text: "This invoice is already posted and cannot be modified." });
+    return;
+  }
+  
+  // Check if user is currently editing an item
+  if (isEditingItem) {
+    setMessage({ type: "error", text: "Please finish editing the current item before updating the invoice." });
+    return;
+  }
+  
+  // If updating an existing invoice, check if any item has been edited
+  if (isEditingInvoice) {
+    const hasEditedItems = items.some(item =>
+      item.isEdited ||
+      item.isBeingEdited ||
+      item.discountBreakdown?.some(d => d.isEdited) ||
+      item.taxBreakdown?.some(t => t.isEdited)
+    );
+    if (!hasEditedItems) {
+      setMessage({ type: "error", text: "Please edit at least one item before updating the invoice." });
       return;
     }
-
-    // Check if user is currently editing an item
-    if (isEditingItem) {
-      setMessage({ type: "error", text: "Please finish editing the current item before updating the invoice." });
-      return;
-    }
-
-    // If updating an existing invoice, check if any item has been edited
-    if (isEditingInvoice) {
-      const hasEditedItems = items.some(item =>
-        item.isEdited ||
-        item.isBeingEdited ||
-        item.discountBreakdown?.some(d => d.isEdited) ||
-        item.taxBreakdown?.some(t => t.isEdited)
-      );
-
-      if (!hasEditedItems) {
-        setMessage({ type: "error", text: "Please edit at least one item before updating the invoice." });
-        return;
-      }
-    }
-
-    // If there are no items in the list and the form has data, add current form data as an item
-    if (items.length === 0 && selectedGoDown && selectedDebtorAccount && selectedSubAccount) {
-      const currentItem = createItemFromForm();
-      setItems([currentItem]);
-    }
-
-    // Check if there are items to save
-    if (items.length === 0) {
-      setMessage({ type: "error", text: "Please add at least one item to the invoice" });
-      return;
-    }
-
-    setLoading(true);
-    setMessage(null);
-    try {
-      // Calculate totals based on all items
-      const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
-      const totalDiscount = items.reduce((sum, item) => sum + (item.amount - item.netAmountBeforeTax), 0);
-      const totalTax = items.reduce((sum, item) => sum + (item.netAmount - item.netAmountBeforeTax), 0);
-      const totalNetAmount = items.reduce((sum, item) => sum + item.netAmount, 0);
-
-      // Get HS Code from the selected account level 4
-      const selectedAccountLevel4Obj = accountLevel4s.find(al4 => al4._id === selectedAccountLevel4);
-      const hsCode = selectedAccountLevel4Obj?.hsCode || '';
-
-      // Prepare items data - only include edited items when updating
-      const itemsData = isEditingInvoice
-        ? items.filter(item =>
+  }
+  
+  // If there are no items in the list and the form has data, add current form data as an item
+  if (items.length === 0 && selectedGoDown && selectedDebtorAccount && selectedSubAccount) {
+    const currentItem = createItemFromForm();
+    setItems([currentItem]);
+  }
+  
+  // Check if there are items to save
+  if (items.length === 0) {
+    setMessage({ type: "error", text: "Please add at least one item to the invoice" });
+    return;
+  }
+  
+  setLoading(true);
+  setMessage(null);
+  
+  try {
+    // Calculate totals based on all items
+    const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+    const totalDiscount = items.reduce((sum, item) => sum + (item.amount - item.netAmountBeforeTax), 0);
+    const totalTax = items.reduce((sum, item) => sum + (item.netAmount - item.netAmountBeforeTax), 0);
+    const totalNetAmount = items.reduce((sum, item) => sum + item.netAmount, 0);
+    
+    // Prepare items data - only include edited items when updating
+    const itemsData = isEditingInvoice
+      ? items.filter(item =>
           item.isEdited ||
           item.isBeingEdited ||
           item.discountBreakdown?.some(d => d.isEdited) ||
@@ -2977,9 +3839,9 @@ useEffect(() => {
           rateInfo: item.rateInfo,
           finishedGoodId: item.finishedGoodId || selectedFinishedGood,
           accountLevel4Id: item.accountLevel4Id || selectedAccountLevel4,
-          hsCode: item.hsCode || hsCode
+          // Removed hsCode field - will be fetched by backend
         }))
-        : items.map(item => ({
+      : items.map(item => ({
           ...item,
           productId: item.accountLevel4Id,
           productName: item.productName,
@@ -2997,90 +3859,90 @@ useEffect(() => {
           rateInfo: item.rateInfo,
           finishedGoodId: item.finishedGoodId || selectedFinishedGood,
           accountLevel4Id: item.accountLevel4Id || selectedAccountLevel4,
-          hsCode: item.hsCode || hsCode
+          // Removed hsCode field - will be fetched by backend
         }));
-
-      const voucherData = {
-        goDownId: selectedGoDown,
-        invoiceType,
-        // Always use the existing invoice number when updating
-        invoiceNumber: existingInvoiceData ? existingInvoiceData.invoiceNumber : invoiceNumber,
-        invoiceDate,
-        fbrInvoiceNumber,
-        customerAddress: address,
-        poNumber,
-        poDate,
-        ogpNumber,
-        ogpDate,
-        dcNumber,
-        dcDate,
-        vehicleNumber,
-        remarks,
-        debtorAccountId: selectedDebtorAccount,
-        subAccountId: selectedSubAccount,
-        parentCenterId: selectedParentCenter,
-        childCenterId: selectedChildCenter,
-        finishedGoodId: selectedFinishedGood,
-        accountLevel4Id: selectedAccountLevel4,
-        items: itemsData,
-        totalAmount: totalAmount,
-        discountAmount: totalDiscount,
-        taxAmount: totalTax,
-        netAmount: totalNetAmount,
-        netAmountBeforeTax: totalAmount - totalDiscount,
-        customerProfile
-      };
-
-      // Determine if we're updating an existing invoice or creating a new one
-      const method = existingInvoiceData ? 'PUT' : 'POST';
-      // Extract the ID correctly from the nested structure
-      const invoiceId = existingInvoiceData && existingInvoiceData._id ?
-        (existingInvoiceData._id.$oid || existingInvoiceData._id) : null;
-      const url = invoiceId
-        ? `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}`
-        : `http://localhost:5000/api/sales-vouchers/${companyId}`;
-
-      const response = await fetch(url, {
-        method: method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(voucherData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to save sales voucher');
-      }
-
-      const responseData = await response.json();
-      setMessage({ type: "success", text: existingInvoiceData ? "Invoice updated successfully!" : "Invoice created successfully!" });
-
-      // Reset form and items only if it's a new invoice
-      if (!existingInvoiceData) {
-        setItems([]);
-        resetForm();
-        setSelectedGoDown('');
-        setInvoiceType('');
-        setSelectedDebtorAccount('');
-        setSelectedSubAccount('');
-        setSelectedParentCenter('');
-        setSelectedChildCenter('');
-        setCustomerProfile(null);
-        setInvoiceNumber('');
-      }
-
-      // Always reset editing states
-      setIsEditingInvoice(false);
-      setIsEditingItem(false);
-      setEditingItemIndex(null);
-
-      // Clear existing invoice data after successful update
-      setExistingInvoiceData(null);
-    } catch (err) {
-      setMessage({ type: "error", text: err.message || 'Failed to save invoice' });
-    } finally {
-      setLoading(false);
+    
+    const voucherData = {
+      goDownId: selectedGoDown,
+      invoiceType,
+      invoiceNumber: existingInvoiceData ? existingInvoiceData.invoiceNumber : invoiceNumber,
+      invoiceDate,
+      fbrInvoiceNumber,
+      customerAddress: address,
+      poNumber,
+      poDate,
+      ogpNumber,
+      ogpDate,
+      dcNumber,
+      dcDate,
+      vehicleNumber,
+      remarks,
+      debtorAccountId: selectedDebtorAccount,
+      subAccountId: selectedSubAccount,
+      parentCenterId: selectedParentCenter,
+      childCenterId: selectedChildCenter,
+      finishedGoodId: selectedFinishedGood,
+      accountLevel4Id: selectedAccountLevel4,
+      items: itemsData,
+      totalAmount: totalAmount,
+      discountAmount: totalDiscount,
+      taxAmount: totalTax,
+      netAmount: totalNetAmount,
+      netAmountBeforeTax: totalAmount - totalDiscount,
+      customerProfile
+    };
+    
+    // Determine if we're updating an existing invoice or creating a new one
+    const method = existingInvoiceData ? 'PUT' : 'POST';
+    const invoiceId = existingInvoiceData && existingInvoiceData._id ?
+      (existingInvoiceData._id.$oid || existingInvoiceData._id) : null;
+    const url = invoiceId
+      ? `http://localhost:5000/api/sales-vouchers/${companyId}/${invoiceId}`
+      : `http://localhost:5000/api/sales-vouchers/${companyId}`;
+    
+    const response = await fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(voucherData)
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to save sales voucher');
     }
-  };
+    
+    const responseData = await response.json();
+    
+    setMessage({ type: "success", text: existingInvoiceData ? "Invoice updated successfully!" : "Invoice created successfully!" });
+    
+    // Reset form and items only if it's a new invoice
+    if (!existingInvoiceData) {
+      setItems([]);
+      resetForm();
+      setSelectedGoDown('');
+      setInvoiceType('');
+      setSelectedDebtorAccount('');
+      setSelectedSubAccount('');
+      setSelectedParentCenter('');
+      setSelectedChildCenter('');
+      setCustomerProfile(null);
+      setInvoiceNumber('');
+    }
+    
+    // Always reset editing states
+    setIsEditingInvoice(false);
+    setIsEditingItem(false);
+    setEditingItemIndex(null);
+    
+    // Clear existing invoice data after successful update
+    setExistingInvoiceData(null);
+  } catch (err) {
+    setMessage({ type: "error", text: err.message || 'Failed to save invoice' });
+  } finally {
+    setLoading(false);
+  }
+};
+
   // Fetch cities
   useEffect(() => {
     const fetchCities = async () => {
@@ -3115,50 +3977,47 @@ useEffect(() => {
     return 'N/A';
   };
 
-  const createItemFromForm = () => {
-    // Get the HS Code for the selected account level 4
-    const selectedAccountLevel4Obj = accountLevel4s.find(al4 => al4._id === selectedAccountLevel4);
-    const hsCode = selectedAccountLevel4Obj?.hsCode || '';
-    return {
-      finishedGoodId: selectedFinishedGood,
-      accountLevel4Id: selectedAccountLevel4,
-      unitMeasurementId: selectedUnitMeasurement,
-      quantity: quantity,
-      rate: rate,
-      amount: amount,
-      netAmountBeforeTax: netAmountBeforeTax,
-      netAmount: netAmount,
-      discountBreakdown: discountBreakdown.map(d => ({
-        title: d.title,
-        type: d.type,
-        rate: d.rate,
-        value: d.value,
-        isEdited: editableDiscounts[d.discountTypeId] || false,
-        originalValue: d.originalValue,
-        discountTypeId: d.discountTypeId
-      })),
-      taxBreakdown: taxBreakdown.map(t => ({
-        title: t.title,
-        rate: customerProfile?.customerType === 'registered' ? t.registeredValue : t.unregisteredValue,
-        value: t.value,
-        isEdited: editableTaxes[t.taxTypeId] || false,
-        originalValue: t.originalValue,
-        taxTypeId: t.taxTypeId,
-        transactionType: t.transactionType || 'sale',
-        registeredValue: t.registeredValue,
-        unregisteredValue: t.unregisteredValue
-      })),
-      rateInfo: rateInfo ? {
-        applicableDate: rateInfo.applicableDate,
-        isActive: rateInfo.isActive,
-        isFallbackRate: rateInfo.isFallbackRate || false
-      } : null,
-      productName: getSelectedAccountLevel4Name(),
-      unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
-      unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
-      hsCode // Include the HS Code
-    };
+const createItemFromForm = () => {
+  return {
+    finishedGoodId: selectedFinishedGood,
+    accountLevel4Id: selectedAccountLevel4,
+    unitMeasurementId: selectedUnitMeasurement,
+    quantity: quantity,
+    rate: rate,
+    amount: amount,
+    netAmountBeforeTax: netAmountBeforeTax,
+    netAmount: netAmount,
+    discountBreakdown: discountBreakdown.map(d => ({
+      title: d.title,
+      type: d.type,
+      rate: d.rate,
+      value: d.value,
+      isEdited: editableDiscounts[d.discountTypeId] || false,
+      originalValue: d.originalValue,
+      discountTypeId: d.discountTypeId
+    })),
+    taxBreakdown: taxBreakdown.map(t => ({
+      title: t.title,
+      rate: customerProfile?.customerType === 'registered' ? t.registeredValue : t.unregisteredValue,
+      value: t.value,
+      isEdited: editableTaxes[t.taxTypeId] || false,
+      originalValue: t.originalValue,
+      taxTypeId: t.taxTypeId,
+      transactionType: t.transactionType || 'sale',
+      registeredValue: t.registeredValue,
+      unregisteredValue: t.unregisteredValue
+    })),
+    rateInfo: rateInfo ? {
+      applicableDate: rateInfo.applicableDate,
+      isActive: rateInfo.isActive,
+      isFallbackRate: rateInfo.isFallbackRate || false
+    } : null,
+    productName: getSelectedAccountLevel4Name(),
+    unitMeasurementCode: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[0] : '',
+    unitMeasurementTitle: selectedUnitMeasurement ? getSelectedUnitMeasurementName().split(' - ')[1] : '',
+    // Removed hsCode field - will be fetched by backend
   };
+};
 
 
 const handlePrintReport = () => {
@@ -3327,31 +4186,99 @@ const handlePrintReport = () => {
   printWindow.print();
 };
 
+// =======================
+// Module: FBR Logo Handler
+// =======================
+const FBRLogoHandler = (() => {
+  const getFallbackLogo = () =>
+    'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiByeD0iNSIgZmlsbD0iI2ZmZmZmZiIvPgo8dGV4dCB4PSI0MCIgeT0iNDAiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzMzMzMzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkZCUjwvdGV4dD4KPC9zdmc+';
+  
+  const getLogo = async () => {
+    try {
+      // Instead of fetching and converting the image, we'll return the URL directly
+      // This avoids CORS issues when trying to fetch external images
+      return 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTf5NukaeNqPU-zzAIKRXQOZBy74zxVx6Lttg&s';
+    } catch (err) {
+      console.warn('Using fallback FBR logo:', err.message);
+      return getFallbackLogo();
+    }
+  };
+  
+  return { getLogo };
+})();
 
-  const handlePrintInvoice = (options = {}) => {
+// ==========================
+// Module: QR Code Generator
+// ==========================
+const QRCodeGenerator = (() => {
+  const loadQRCodeLibrary = () => {
+    return new Promise((resolve, reject) => {
+      if (window.QRCode) return resolve();
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Failed to load QRCode library'));
+      document.head.appendChild(script);
+    });
+  };
+  
+  const generate = async (text) => {
+    if (!window.QRCode) await loadQRCodeLibrary();
+    return new Promise((resolve, reject) => {
+      const div = document.createElement('div');
+      div.style.display = 'none';
+      document.body.appendChild(div);
+      new window.QRCode(div, {
+        text,
+        width: 120,
+        height: 120,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: window.QRCode.CorrectLevel.H,
+      });
+      setTimeout(() => {
+        const canvas = div.querySelector('canvas');
+        if (canvas) {
+          const dataUri = canvas.toDataURL('image/png');
+          document.body.removeChild(div);
+          resolve(dataUri);
+        } else {
+          document.body.removeChild(div);
+          reject(new Error('QR code canvas not found'));
+        }
+      }, 100);
+    });
+  };
+  
+  return { generate };
+})();
+
+// Main print function using the modules
+const handlePrintInvoice = async (options = {}) => {
+  try {
     // Get debtor account name
     const debtorAccountObj = debtorAccounts.find(da => da._id === selectedDebtorAccount);
     const debtorAccountName = debtorAccountObj ? debtorAccountObj.title : '';
-
+    
     // Get customer name from sub account
     const subAccountObj = subAccounts.find(sa => sa._id === selectedSubAccount);
     const customerName = subAccountObj ? subAccountObj.title : '';
-
+    
     // Calculate totals
     const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
     const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
-
+    
     // Collect all unique tax titles
     const allTaxTitles = new Set();
     items.forEach(item => {
-      if (item.taxBreakdown) {
+      if (item.taxBreakdown && item.taxBreakdown.length > 0) {
         item.taxBreakdown.forEach(tax => {
           allTaxTitles.add(tax.title);
         });
       }
     });
     const taxTitles = Array.from(allTaxTitles);
-
+    
     // Calculate total for each tax type
     const taxTotals = {};
     taxTitles.forEach(title => {
@@ -3360,25 +4287,21 @@ const handlePrintReport = () => {
         return sum + (tax ? tax.value : 0);
       }, 0);
     });
-
     const totalTaxes = Object.values(taxTotals).reduce((sum, value) => sum + value, 0);
     const grandTotal = items.reduce((sum, item) => sum + item.netAmount, 0);
-
+    
     // Function to convert number to words
     const numberToWords = (num) => {
       const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
       const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
       const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-
       const convertLessThanThousand = (n) => {
         if (n === 0) return '';
         let result = '';
-
         if (n >= 100) {
           result += ones[Math.floor(n / 100)] + ' Hundred ';
           n = n % 100;
         }
-
         if (n >= 20) {
           result += tens[Math.floor(n / 10)] + ' ';
           n = n % 10;
@@ -3386,44 +4309,33 @@ const handlePrintReport = () => {
           result += teens[n - 10] + ' ';
           n = 0;
         }
-
         if (n > 0) {
           result += ones[n] + ' ';
         }
-
         return result.trim();
       };
-
       if (num === 0) return 'Zero';
-
       let integerPart = Math.floor(num);
       const decimalPart = Math.round((num - integerPart) * 100);
-
       let result = '';
-
       if (integerPart >= 1000000) {
         result += convertLessThanThousand(Math.floor(integerPart / 1000000)) + ' Million ';
         integerPart = integerPart % 1000000;
       }
-
       if (integerPart >= 1000) {
         result += convertLessThanThousand(Math.floor(integerPart / 1000)) + ' Thousand ';
         integerPart = integerPart % 1000;
       }
-
       if (integerPart > 0) {
         result += convertLessThanThousand(integerPart) + ' ';
       }
-
       result += 'Dollars';
-
       if (decimalPart > 0) {
         result += ' and ' + convertLessThanThousand(decimalPart) + ' Cents';
       }
-
       return result.trim();
     };
-
+    
     // Generate additional fields HTML based on options
     let additionalFieldsHtml = '';
     if (options.poNumber && poNumber) {
@@ -3447,7 +4359,7 @@ const handlePrintReport = () => {
     if (options.vehicleNumber && vehicleNumber) {
       additionalFieldsHtml += `<p><strong>Vehicle Number:</strong> ${vehicleNumber}</p>`;
     }
-
+    
     // Create additional section HTML if any field is selected
     let additionalSectionHtml = '';
     if (additionalFieldsHtml) {
@@ -3456,9 +4368,28 @@ const handlePrintReport = () => {
         <h3>Additional Information</h3>
         ${additionalFieldsHtml}
       </div>
-    `;
+      `;
     }
-
+    
+    // Get the FBR logo URL - we'll use it directly in the HTML
+    let fbrLogoUrl = '';
+    try {
+      fbrLogoUrl = await FBRLogoHandler.getLogo();
+    } catch (error) {
+      console.error('Error getting FBR logo URL:', error);
+      fbrLogoUrl = '';
+    }
+    
+    // Generate QR code if fbrInvoiceNumber exists
+    let qrCodeDataUri = '';
+    if (fbrInvoiceNumber) {
+      try {
+        qrCodeDataUri = await QRCodeGenerator.generate(fbrInvoiceNumber);
+      } catch (error) {
+        console.error('Error generating QR code:', error);
+      }
+    }
+    
     // Create print content
     const printContent = `
     <!DOCTYPE html>
@@ -3497,6 +4428,9 @@ const handlePrintReport = () => {
           text-align: center;
           position: relative;
           overflow: hidden;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
         }
         
         .invoice-header::before {
@@ -3523,6 +4457,29 @@ const handlePrintReport = () => {
           opacity: 0.9;
           position: relative;
           z-index: 1;
+        }
+        
+        .company-logo {
+          width: 80px;
+          height: 80px;
+          object-fit: contain;
+          background-color: white;
+          padding: 5px;
+          border-radius: 5px;
+          display: block;
+        }
+        
+        .company-logo-placeholder {
+          width: 80px;
+          height: 80px;
+          background-color: white;
+          color: #1a2980;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: bold;
+          font-size: 24px;
+          border-radius: 5px;
         }
         
         .invoice-body {
@@ -3580,6 +4537,18 @@ const handlePrintReport = () => {
         .invoice-details p strong {
           min-width: 100px;
           color: #555;
+        }
+        
+        .invoice-details .qr-code {
+          display: flex;
+          align-items: center;
+          margin-top: 10px;
+        }
+        
+        .invoice-details .qr-code img {
+          width: 60px;
+          height: 60px;
+          margin-left: 10px;
         }
         
         .invoice-table {
@@ -3642,6 +4611,16 @@ const handlePrintReport = () => {
         
         .tax-item .tax-value {
           font-weight: 600;
+        }
+        
+        .exempted {
+          color: #28a745;
+          font-weight: 600;
+        }
+        
+        .zero-tax {
+          color: #6c757d;
+          font-style: italic;
         }
         
         .totals-section {
@@ -3831,6 +4810,11 @@ const handlePrintReport = () => {
             font-size: 9px;
           }
           
+          .invoice-details .qr-code img {
+            width: 40px;
+            height: 40px;
+          }
+          
           .signature-section {
             flex-direction: column;
             align-items: center;
@@ -3880,6 +4864,17 @@ const handlePrintReport = () => {
           .signature-box p {
             font-size: 9px;
           }
+          
+          .company-logo {
+            width: 60px;
+            height: 60px;
+          }
+          
+          .company-logo-placeholder {
+            width: 60px;
+            height: 60px;
+            font-size: 18px;
+          }
         }
         
         @media screen and (max-width: 768px) {
@@ -3918,6 +4913,17 @@ const handlePrintReport = () => {
             width: 80%;
             margin-bottom: 20px;
           }
+          
+          .company-logo {
+            width: 60px;
+            height: 60px;
+          }
+          
+          .company-logo-placeholder {
+            width: 60px;
+            height: 60px;
+            font-size: 18px;
+          }
         }
       </style>
     </head>
@@ -3926,8 +4932,15 @@ const handlePrintReport = () => {
         <div class="watermark">${companyDetails?.companyName || debtorAccountName}</div>
         
         <div class="invoice-header">
-          <h1>SALES INVOICE</h1>
-          <p>Original for Recipient</p>
+          ${fbrLogoUrl ? 
+            `<img src="${fbrLogoUrl}" alt="FBR Logo" class="company-logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+             <div class="company-logo-placeholder" style="display: none;">FBR</div>` : 
+            `<div class="company-logo-placeholder">FBR</div>`
+          }
+          <div>
+            <h1>SALES INVOICE</h1>
+            <p>Original for Recipient</p>
+          </div>
         </div>
         
         <div class="invoice-body">
@@ -3945,6 +4958,15 @@ const handlePrintReport = () => {
               <p><strong>Invoice #:</strong> ${invoiceNumber}</p>
               <p><strong>Date:</strong> ${new Date(invoiceDate).toLocaleDateString()}</p>
               <p><strong>Due Date:</strong> ${new Date(new Date(invoiceDate).setDate(new Date(invoiceDate).getDate() + 30)).toLocaleDateString()}</p>
+              ${fbrInvoiceNumber && qrCodeDataUri ? 
+                `<div class="qr-code">
+                  <div>
+                    <strong>FBR Invoice #:</strong> ${fbrInvoiceNumber}
+                  </div>
+                  <img src="${qrCodeDataUri}" alt="QR Code" />
+                </div>` : 
+                ''
+              }
             </div>
             
             <div>
@@ -3966,6 +4988,7 @@ const handlePrintReport = () => {
                     <th>Product</th>
                     <th>Qty</th>
                     <th>Rate</th>
+                    <th>Tax Status</th>
                     <th>Tax Breakdown</th>
                     <th>Total Taxes</th>
                     <th>Net Amount</th>
@@ -3973,38 +4996,38 @@ const handlePrintReport = () => {
                 </thead>
                 <tbody>
                   ${items.map((item, index) => {
-      const itemTaxes = {};
-      let totalItemTax = 0;
-
-      // Initialize all tax values to 0
-      taxTitles.forEach(title => {
-        itemTaxes[title] = 0;
-      });
-
-      // Fill in actual tax values
-      if (item.taxBreakdown) {
-        item.taxBreakdown.forEach(tax => {
-          if (taxTitles.includes(tax.title)) {
-            itemTaxes[tax.title] = tax.value;
-            totalItemTax += tax.value;
-          }
-        });
-      }
-
-      // Create tax breakdown HTML
-      const taxBreakdownHtml = taxTitles.map(title =>
-        `<div class="tax-item">
-                        <span class="tax-title">${title}:</span>
-                        <span class="tax-value">$${itemTaxes[title].toFixed(2)}</span>
-                      </div>`
-      ).join('');
-
-      return `
+                    // Check if item is exempted
+                    const isExempted = item.isExempted || false;
+                    
+                    // Calculate total tax for this item
+                    let totalItemTax = 0;
+                    let taxBreakdownHtml = '';
+                    
+                    if (isExempted) {
+                      taxBreakdownHtml = `<div class="tax-item exempted">Exempted</div>`;
+                    } else if (item.taxBreakdown && item.taxBreakdown.length > 0) {
+                      // Create tax breakdown HTML
+                      taxBreakdownHtml = item.taxBreakdown.map(tax => 
+                        `<div class="tax-item">
+                          <span class="tax-title">${tax.title}:</span>
+                          <span class="tax-value">$${tax.value.toFixed(2)}</span>
+                        </div>`
+                      ).join('');
+                      
+                      // Calculate total tax
+                      totalItemTax = item.taxBreakdown.reduce((sum, tax) => sum + tax.value, 0);
+                    } else {
+                      // No tax breakdown
+                      taxBreakdownHtml = `<div class="tax-item zero-tax">No Tax</div>`;
+                    }
+                    
+                    return `
                       <tr>
                         <td>${index + 1}</td>
                         <td>${item.productName}</td>
                         <td>${item.quantity}</td>
                         <td>$${item.rate.toFixed(2)}</td>
+                        <td>${isExempted ? '<span class="exempted">Exempted</span>' : '<span class="zero-tax">Taxable</span>'}</td>
                         <td>
                           <div class="tax-breakdown">
                             ${taxBreakdownHtml}
@@ -4014,20 +5037,21 @@ const handlePrintReport = () => {
                         <td>$${item.netAmount.toFixed(2)}</td>
                       </tr>
                     `;
-    }).join('')}
+                  }).join('')}
                 </tbody>
                 <tfoot>
                   <tr>
                     <td colspan="3"><strong>Total</strong></td>
                     <td><strong>$${totalAmount.toFixed(2)}</strong></td>
+                    <td></td>
                     <td>
                       <div class="tax-breakdown">
-                        ${taxTitles.map(title =>
-      `<div class="tax-item">
+                        ${taxTitles.map(title => 
+                          `<div class="tax-item">
                             <span class="tax-title">${title}:</span>
                             <span class="tax-value"><strong>$${taxTotals[title].toFixed(2)}</strong></span>
                           </div>`
-    ).join('')}
+                        ).join('')}
                       </div>
                     </td>
                     <td><strong>$${totalTaxes.toFixed(2)}</strong></td>
@@ -4044,7 +5068,7 @@ const handlePrintReport = () => {
               <p class="amount">${totalQuantity}</p>
             </div>
             <div class="totals-row">
-              <p>Total Rate:</p>
+              <p>Total Amount:</p>
               <p class="amount">$${totalAmount.toFixed(2)}</p>
             </div>
             <div class="totals-row">
@@ -4089,21 +5113,24 @@ const handlePrintReport = () => {
       </div>
     </body>
     </html>
-  `;
-
+    `;
+    
     // Open print window
     const printWindow = window.open('', '_blank');
     printWindow.document.open();
     printWindow.document.write(printContent);
     printWindow.document.close();
-
+    
     // Print automatically
     printWindow.onload = function () {
       printWindow.print();
       printWindow.close();
     };
-  };
-
+  } catch (error) {
+    console.error('Error in handlePrintInvoice:', error);
+    alert('An error occurred while preparing the invoice for printing. Please try again.');
+  }
+};
 
   return (
     <motion.div
@@ -5982,7 +7009,6 @@ const handlePrintReport = () => {
                     type="number"
                     id="quantity"
                     ref={fieldRefs.quantity}
-                    min="0"
                     step="any"
                     value={quantity}
                     onChange={(e) => setQuantity(Math.max(0, parseFloat(e.target.value) || 0))}
@@ -7278,6 +8304,13 @@ const handlePrintReport = () => {
               </motion.div>
             )}
           </AnimatePresence>
+          <FbrResponseModal
+        showFbrResponseModal={showFbrResponseModal}
+        setShowFbrResponseModal={setShowFbrResponseModal}
+        fbrResponse={fbrResponse}
+        existingInvoiceData={existingInvoiceData}
+        setMessage={setMessage}
+      />
           <AnimatePresence>
             {showValidationModal && (
               <motion.div

@@ -10,7 +10,6 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
   const [filteredMenus, setFilteredMenus] = useState([]);
   const [expandedMenus, setExpandedMenus] = useState(new Set());
   const [userProfile, setUserProfile] = useState(null);
-  const [accessibleMenuIds, setAccessibleMenuIds] = useState([]);
   const navigate = useNavigate();
   
   useEffect(() => {
@@ -30,21 +29,6 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
         })
         .catch((err) => console.error(err));
       
-      // Get accessible menu IDs from localStorage
-      const storedMenus = localStorage.getItem("accessibleMenus");
-      if (storedMenus) {
-        try {
-          const menuIds = JSON.parse(storedMenus);
-          console.log("Loaded accessible menu IDs:", menuIds);
-          setAccessibleMenuIds(menuIds);
-        } catch (err) {
-          console.error("Error parsing accessible menus:", err);
-          setAccessibleMenuIds([]);
-        }
-      } else {
-        console.log("No accessible menus found in localStorage");
-      }
-      
       // Mock user profile data
       setUserProfile({
         name: localStorage.getItem("username") || "John Doe",
@@ -53,70 +37,17 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
     }
   }, []);
   
-  // Filter menus based on search term and user permissions
+  // Filter menus based on search term
   useEffect(() => {
     if (!allMenus.length) return;
     
-    console.log("Filtering menus. Accessible IDs:", accessibleMenuIds);
-    
-    // First filter by search term
     const searchFiltered = allMenus.filter(menu => {
       if (!search) return true;
       return menu.title.toLowerCase().includes(search.toLowerCase());
     });
     
-    // Then filter by user permissions
-    const permissionFiltered = filterMenusByPermission(searchFiltered);
-    setFilteredMenus(permissionFiltered);
-    console.log("Filtered menus:", permissionFiltered);
-  }, [allMenus, search, accessibleMenuIds]);
-  
-  // Function to filter menus based on user permissions
-  const filterMenusByPermission = (menus) => {
-    if (!menus || !Array.isArray(menus)) return [];
-    
-    return menus
-      .map(menu => {
-        if (!menu) return null;
-        
-        // FIXED: More robust handling of menu ID
-        let menuIdStr = null;
-        if (menu._id) {
-          if (typeof menu._id === 'string') {
-            menuIdStr = menu._id;
-          } else if (typeof menu._id === 'object' && menu._id.$oid) {
-            menuIdStr = menu._id.$oid;
-          } else if (typeof menu._id.toString === 'function') {
-            try {
-              menuIdStr = menu._id.toString();
-            } catch (e) {
-              console.error("Error converting menu._id to string:", e);
-            }
-          }
-        }
-        
-        const hasAccess = menuIdStr && accessibleMenuIds.includes(menuIdStr);
-        console.log(`Menu: ${menu.title}, ID: ${menuIdStr}, Has Access: ${hasAccess}`);
-        
-        // Process children
-        const filteredChildren = menu.children && Array.isArray(menu.children) && menu.children.length > 0
-          ? filterMenusByPermission(menu.children)
-          : [];
-        
-        // Include menu if:
-        // 1. User has direct access to it, OR
-        // 2. It has children that the user has access to
-        if (hasAccess || filteredChildren.length > 0) {
-          return {
-            ...menu,
-            children: filteredChildren
-          };
-        }
-        
-        return null;
-      })
-      .filter(Boolean);
-  };
+    setFilteredMenus(searchFiltered);
+  }, [allMenus, search]);
   
   const toggleMenu = (id) => {
     if (!id) return;
@@ -151,27 +82,6 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
     const hasChildren = menu.children && Array.isArray(menu.children) && menu.children.length > 0;
     const isExpanded = menu._id ? expandedMenus.has(menu._id.toString()) : expandedMenus.has(menu.title);
     
-    // FIXED: More robust handling of menu ID for access check
-    let hasAccess = false;
-    if (menu._id) {
-      let menuIdStr = null;
-      if (typeof menu._id === 'string') {
-        menuIdStr = menu._id;
-      } else if (typeof menu._id === 'object' && menu._id.$oid) {
-        menuIdStr = menu._id.$oid;
-      } else if (typeof menu._id.toString === 'function') {
-        try {
-          menuIdStr = menu._id.toString();
-        } catch (e) {
-          console.error("Error converting menu._id to string:", e);
-        }
-      }
-      
-      if (menuIdStr) {
-        hasAccess = accessibleMenuIds.includes(menuIdStr);
-      }
-    }
-    
     return (
       <div key={menu._id || menu.title || `menu-${level}`} className={`mb-1 transition-all duration-200`}>
         <div
@@ -180,16 +90,13 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
             ${isExpanded 
               ? "bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30" 
               : "hover:bg-gray-100 dark:hover:bg-gray-800/50"}
-            ${!hasAccess ? "opacity-70" : ""}
           `}
         >
           <a
             href={menu.href || "#"}
             onClick={(e) => !hasChildren && handleMenuClick(e, menu.href)}
             className={`flex items-center text-xs w-full transition-colors duration-200
-              ${hasAccess 
-                ? "text-gray-700 dark:text-gray-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-300" 
-                : "text-gray-500 dark:text-gray-400"}
+              text-gray-700 dark:text-gray-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-300
             `}
           >
             {getIcon(menu.icon)}
@@ -219,7 +126,6 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
     localStorage.removeItem("companyName");
     localStorage.removeItem("locationName");
     localStorage.removeItem("title");
-    localStorage.removeItem("accessibleMenus"); // Remove accessible menus on logout
     window.location.href = "/login";
   };
   
@@ -310,7 +216,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
                 filteredMenus.map((menu) => renderMenu(menu))
               ) : (
                 <p className="text-xs text-gray-500 dark:text-gray-400 p-2">
-                  No accessible menus
+                  No menus found
                 </p>
               )}
             </div>

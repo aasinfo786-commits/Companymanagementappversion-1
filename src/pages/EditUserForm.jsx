@@ -1,4 +1,3 @@
-// 📁 src/pages/EditUserForm.jsx
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -15,8 +14,7 @@ import {
   Calendar,
   ArrowLeft,
   Eye,
-  EyeOff,
-  Menu
+  EyeOff
 } from "lucide-react";
 
 const EditUserForm = () => {
@@ -31,7 +29,6 @@ const EditUserForm = () => {
     companyId: "",
     locationId: "",
     financialYearId: "",
-    accessibleMenus: [], // New field for menu permissions
     // Password fields
     oldPassword: "",
     newPassword: "",
@@ -41,13 +38,11 @@ const EditUserForm = () => {
   const [companies, setCompanies] = useState([]);
   const [locations, setLocations] = useState([]);
   const [financialYears, setFinancialYears] = useState([]);
-  const [menus, setMenus] = useState([]); // New state for menus
   const [isLoading, setIsLoading] = useState({
     user: true,
     companies: true,
     locations: false,
-    financialYears: false,
-    menus: true // New loading state for menus
+    financialYears: false
   });
   const [message, setMessage] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
@@ -90,7 +85,6 @@ const EditUserForm = () => {
           companyId: userData.companyId || "",
           locationId: userData.locationId || "",
           financialYearId: userData.financialYearId || "",
-          accessibleMenus: userData.accessibleMenus ? userData.accessibleMenus.map(menu => menu._id) : [], // Set accessible menus
           // Initialize password fields as empty
           oldPassword: "",
           newPassword: "",
@@ -113,7 +107,7 @@ const EditUserForm = () => {
     fetchUser();
   }, [id]);
   
-  // Fetch companies and menus on mount
+  // Fetch companies on mount
   useEffect(() => {
     const fetchCompanies = async () => {
       try {
@@ -136,29 +130,7 @@ const EditUserForm = () => {
       }
     };
     
-    const fetchMenus = async () => {
-      try {
-        setIsLoading(prev => ({ ...prev, menus: true }));
-        const token = localStorage.getItem("token");
-        const res = await fetch("http://localhost:5000/api/menus", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || "Failed to fetch menus");
-        }
-        const data = await res.json();
-        setMenus(data);
-      } catch (err) {
-        console.error("Error fetching menus:", err);
-        setMessage({ type: "error", text: err.message });
-      } finally {
-        setIsLoading(prev => ({ ...prev, menus: false }));
-      }
-    };
-    
     fetchCompanies();
-    fetchMenus();
   }, []);
   
   // Fetch locations when company changes
@@ -278,26 +250,10 @@ const EditUserForm = () => {
       });
     }
     
-    // Handle menu selection
-    if (name === "accessibleMenus") {
-      const menuId = value;
-      if (checked) {
-        setFormData(prev => ({
-          ...prev,
-          accessibleMenus: [...prev.accessibleMenus, menuId]
-        }));
-      } else {
-        setFormData(prev => ({
-          ...prev,
-          accessibleMenus: prev.accessibleMenus.filter(id => id !== menuId)
-        }));
-      }
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: type === "checkbox" ? checked : value,
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
   
   const handleImageChange = (e) => {
@@ -387,11 +343,6 @@ const EditUserForm = () => {
       formDataToSend.append("locationId", formData.locationId);
       formDataToSend.append("financialYearId", formData.financialYearId);
       
-      // Add accessible menus to form data
-      formData.accessibleMenus.forEach(menuId => {
-        formDataToSend.append("accessibleMenus", menuId);
-      });
-      
       // Add password fields if password change is requested
       if (changePassword) {
         formDataToSend.append("oldPassword", formData.oldPassword);
@@ -468,33 +419,6 @@ const EditUserForm = () => {
   const getFinancialYearTitle = (id) => {
     const fy = financialYears.find(f => f.yearId === id);
     return fy ? fy.title : "";
-  };
-  
-  // Recursive function to render menu checkboxes
-  const renderMenuCheckboxes = (menuItems, level = 0) => {
-    return menuItems.map((menu) => (
-      <div key={menu._id} className={`ml-${level * 4}`}>
-        <div className="flex items-center space-x-2 py-1">
-          <input
-            type="checkbox"
-            id={`menu-${menu._id}`}
-            name="accessibleMenus"
-            value={menu._id}
-            checked={formData.accessibleMenus.includes(menu._id)}
-            onChange={handleChange}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <label htmlFor={`menu-${menu._id}`} className="text-sm text-gray-700 dark:text-gray-300 flex items-center">
-            {menu.title}
-          </label>
-        </div>
-        {menu.children && menu.children.length > 0 && (
-          <div className="ml-4 border-l-2 border-gray-200 dark:border-gray-700 pl-2">
-            {renderMenuCheckboxes(menu.children, level + 1)}
-          </div>
-        )}
-      </div>
-    ));
   };
   
   if (isLoading.user) {
@@ -720,27 +644,6 @@ const EditUserForm = () => {
                   />
                 </div>
               )}
-            </div>
-            
-            {/* Menu Permissions */}
-            <div className="col-span-1 md:col-span-2">
-              <label
-                className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center gap-2"
-              >
-                <Menu size={16} /> Menu Permissions
-              </label>
-              <div className="p-4 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 max-h-60 overflow-y-auto">
-                {isLoading.menus ? (
-                  <div className="flex justify-center items-center h-20">
-                    <Loader2 className="animate-spin w-5 h-5 text-gray-500" />
-                    <span className="ml-2 text-gray-500 dark:text-gray-400">Loading menus...</span>
-                  </div>
-                ) : menus.length > 0 ? (
-                  renderMenuCheckboxes(menus)
-                ) : (
-                  <p className="text-gray-500 dark:text-gray-400 text-center py-4">No menus available</p>
-                )}
-              </div>
             </div>
             
             {/* Is Allowed */}

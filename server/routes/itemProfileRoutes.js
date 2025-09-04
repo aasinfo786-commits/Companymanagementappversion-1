@@ -8,7 +8,9 @@ const {
   updateItemProfile,
   getItemProfile,
   getItemProfiles,
-  checkExistingProfile
+  checkExistingProfile,
+    getHSCodeForItem
+
 } = require('../controllers/itemProfileController');
 
 // Base path: /api/item-profile
@@ -30,5 +32,5 @@ router.get('/:companyId/profile/:finishedGoodId', getItemProfiles);
 router.get('/:companyId/profile/:finishedGoodId/:profileId', getItemProfile);
 router.post('/', createItemProfile);
 router.put('/:id', updateItemProfile);
-
+router.get('/:companyId/hs-code', getHSCodeForItem);
 module.exports = router;

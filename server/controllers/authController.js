@@ -7,7 +7,7 @@ exports.login = async (req, res) => {
   const { username, password, companyId, locationId, financialYearId } = req.body;
   try {
     // 1. Verify user credentials
-    const user = await User.findOne({ username }).select('+password').populate('accessibleMenus');
+    const user = await User.findOne({ username }).select('+password');
     if (!user || !user.password) {
       return res.status(401).json({ message: 'Invalid username or password' });
     }
@@ -36,7 +36,7 @@ exports.login = async (req, res) => {
     };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
     
-    // 4. Return response with tokens and user data including accessible menus
+    // 4. Return response with tokens and user data
     res.json({ 
       token,
       fbrToken, // Include the FBR token in the response
@@ -46,8 +46,7 @@ exports.login = async (req, res) => {
         role: user.role,
         companyId: user.companyId,
         locationId: user.locationId,
-        financialYearId: user.financialYearId,
-        accessibleMenus: user.accessibleMenus || [] // Include accessible menus
+        financialYearId: user.financialYearId
       }
     });
   } catch (err) {
@@ -56,11 +55,11 @@ exports.login = async (req, res) => {
   }
 };
 
-// Add a new endpoint to get current user data with populated menus
+// Add a new endpoint to get current user data
 exports.getCurrentUser = async (req, res) => {
   try {
-    // Get user with populated accessible menus
-    const user = await User.findById(req.user.id).populate('accessibleMenus');
+    // Get user
+    const user = await User.findById(req.user.id);
     
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -75,8 +74,7 @@ exports.getCurrentUser = async (req, res) => {
       locationId: user.locationId,
       financialYearId: user.financialYearId,
       userPicture: user.userPicture,
-      isAllowed: user.isAllowed,
-      accessibleMenus: user.accessibleMenus || []
+      isAllowed: user.isAllowed
     });
   } catch (err) {
     console.error('Get current user error:', err);

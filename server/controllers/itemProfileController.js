@@ -444,3 +444,51 @@ export const getItemProfile = async (req, res) => {
     });
   }
 };
+
+export const getHSCodeForItem = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    const { finishedGoodId, accountLevel4Id } = req.query;
+    
+    console.log(`[HS-CODE] Fetching HS code for company: ${companyId}, finishedGood: ${finishedGoodId}, accountLevel4: ${accountLevel4Id}`);
+    
+    if (!companyId || !finishedGoodId || !accountLevel4Id) {
+      return res.status(400).json({ 
+        error: 'Company ID, finished good ID and account level 4 ID are required' 
+      });
+    }
+    
+    // Find the item profile for the given finished good and account level 4
+    const itemProfile = await ItemProfile.findOne({
+      companyId,
+      finishedGood: finishedGoodId,
+      accountLevel4: accountLevel4Id
+    })
+    .populate({
+      path: 'hsCode',
+      select: 'hsCode description'
+    });
+    
+    if (!itemProfile) {
+      console.log(`[HS-CODE] No item profile found for the given combination`);
+      return res.json({ hsCode: '' });
+    }
+    
+    if (itemProfile.hsCode) {
+      console.log(`[HS-CODE] Found HS code: ${itemProfile.hsCode.hsCode}`);
+      return res.json({ 
+        hsCode: itemProfile.hsCode.hsCode,
+        description: itemProfile.hsCode.description || ''
+      });
+    } else {
+      console.log(`[HS-CODE] No HS code associated with this item profile`);
+      return res.json({ hsCode: '' });
+    }
+  } catch (err) {
+    console.error('[HS-CODE] Error fetching HS code:', err);
+    res.status(500).json({ 
+      error: 'Failed to fetch HS code',
+      details: err.message 
+    });
+  }
+};

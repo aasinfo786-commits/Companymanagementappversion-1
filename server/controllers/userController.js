@@ -1,5 +1,4 @@
 const User = require('../models/User');
-const Menu = require('../models/Menu');
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
@@ -16,7 +15,7 @@ const removeFile = (filePath) => {
 // GET: All users (excluding password & __v)
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select('-password -__v').populate('accessibleMenus.menuId');
+    const users = await User.find().select('-password -__v');
     res.status(200).json(users);
   } catch (err) {
     res.status(500).json({ 
@@ -30,8 +29,7 @@ exports.getAllUsers = async (req, res) => {
 exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
-      .select('-password -__v')
-      .populate('accessibleMenus.menuId');
+      .select('-password -__v');
     
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.status(200).json(user);
@@ -56,16 +54,6 @@ exports.createUser = async (req, res) => {
     financialYearId,
   } = req.body;
   
-  // Parse accessibleMenus with permissions
-  let accessibleMenus = [];
-  if (req.body.accessibleMenus) {
-    try {
-      accessibleMenus = JSON.parse(req.body.accessibleMenus);
-    } catch (e) {
-      console.error('Error parsing accessibleMenus:', e);
-    }
-  }
-  
   if (!username || !userFullName || !password) {
     if (req.file) removeFile(req.file.path);
     return res.status(400).json({ message: 'Username, full name, and password are required' });
@@ -78,22 +66,6 @@ exports.createUser = async (req, res) => {
       return res.status(400).json({ message: 'Username already exists' });
     }
     
-    // Validate menu permissions structure
-    if (accessibleMenus && accessibleMenus.length > 0) {
-      for (const item of accessibleMenus) {
-        if (!item.menuId || !item.permissions) {
-          if (req.file) removeFile(req.file.path);
-          return res.status(400).json({ message: 'Invalid menu permissions format' });
-        }
-        
-        const menuExists = await Menu.exists({ _id: item.menuId });
-        if (!menuExists) {
-          if (req.file) removeFile(req.file.path);
-          return res.status(400).json({ message: `Menu with ID ${item.menuId} does not exist` });
-        }
-      }
-    }
-    
     const newUser = new User({
       username: username.trim(),
       userFullName: userFullName.trim(),
@@ -104,13 +76,9 @@ exports.createUser = async (req, res) => {
       companyId: companyId ? companyId.trim() : null,
       locationId: locationId ? locationId.trim() : null,
       financialYearId: financialYearId ? financialYearId.trim() : null,
-      accessibleMenus: accessibleMenus || []
     });
     
     await newUser.save();
-    
-    // Populate the menus before sending response
-    await newUser.populate('accessibleMenus.menuId');
     
     const responseUser = newUser.toObject();
     delete responseUser.password;
@@ -140,20 +108,9 @@ exports.updateUser = async (req, res) => {
       companyId,
       locationId,
       financialYearId,
-      accessibleMenus,
       oldPassword,
       newPassword
     } = req.body;
-    
-    // Parse accessibleMenus with permissions
-    let menuPermissions = [];
-    if (accessibleMenus) {
-      try {
-        menuPermissions = JSON.parse(accessibleMenus);
-      } catch (e) {
-        console.error('Error parsing accessibleMenus:', e);
-      }
-    }
     
     const user = await User.findById(req.params.id).select('+password');
     if (!user) {
@@ -179,21 +136,6 @@ exports.updateUser = async (req, res) => {
       user.username = username.trim();
     }
     
-    // Validate menu permissions structure
-    if (menuPermissions) {
-      for (const item of menuPermissions) {
-        if (!item.menuId || !item.permissions) {
-          return res.status(400).json({ message: 'Invalid menu permissions format' });
-        }
-        
-        const menuExists = await Menu.exists({ _id: item.menuId });
-        if (!menuExists) {
-          return res.status(400).json({ message: `Menu with ID ${item.menuId} does not exist` });
-        }
-      }
-      user.accessibleMenus = menuPermissions;
-    }
-    
     // Prepare updates
     if (userFullName) user.userFullName = userFullName.trim();
     if (role) user.role = role.trim();
@@ -212,9 +154,6 @@ exports.updateUser = async (req, res) => {
     }
     
     await user.save();
-    
-    // Populate the menus before sending response
-    await user.populate('accessibleMenus.menuId');
     
     const responseUser = user.toObject();
     delete responseUser.password;

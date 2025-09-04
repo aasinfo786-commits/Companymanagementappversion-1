@@ -17,4 +17,6 @@ router.post('/:companyId/current', taxRateController.getCurrentTaxRates);
 // Delete a specific tax rate
 router.delete('/:id', taxRateController.deleteTaxRate);
 
+
+
 module.exports = router;

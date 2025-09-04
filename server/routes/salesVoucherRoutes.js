@@ -405,5 +405,6 @@ router.patch('/:companyId/:id/post', salesVoucherController.postSalesVoucher);
 // Get sales reports
 router.get('/:companyId/sales-checklist-report', salesVoucherController.getSalesChecklistReport);
 router.get('/:companyId/sales-summary-report', salesVoucherController.getSalesSummaryReport);
+router.patch('/:companyId/:id/fbr-invoice-number', salesVoucherController.updateFbrInvoiceNumber);
 
 module.exports = router;

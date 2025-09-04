@@ -40,7 +40,7 @@ const salesVoucherSchema = new mongoose.Schema({
   invoiceType: {
     type: String,
     required: true,
-    enum: ['Sale Invoice','Tax Invoice', 'Retail Invoice', 'Export Invoice', 'Proforma Invoice']
+    enum: ['Sale Invoice']
   },
   invoiceNumber: {
     type: String,
@@ -101,7 +101,11 @@ const salesVoucherSchema = new mongoose.Schema({
       isActive: Boolean,
       isFallbackRate: Boolean
     },
-    hsCode: String // Added HS Code for each item
+    // Removed hsCode field from here
+    isExempted: { 
+      type: Boolean,
+      default: false
+    }
   }],
   totalAmount: {
     type: Number,
@@ -125,9 +129,9 @@ const salesVoucherSchema = new mongoose.Schema({
   },
   accountingEntries: [accountingEntrySchema],
   customerProfile: {
-    customerType: String // 'registered' or 'un-registered'
+    customerType: String
   },
-  isPosted: { // Added field to track posting status
+  isPosted: { 
     type: Boolean,
     default: false
   },

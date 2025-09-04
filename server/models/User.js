@@ -44,32 +44,6 @@ const userSchema = new mongoose.Schema({
     trim: true,
     required: false,
   },
-  // Updated field for menu permissions with detailed access rights
-  accessibleMenus: [{
-    menuId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Menu',
-      required: true
-    },
-    permissions: {
-      view: {
-        type: Boolean,
-        default: true
-      },
-      add: {
-        type: Boolean,
-        default: false
-      },
-      edit: {
-        type: Boolean,
-        default: false
-      },
-      delete: {
-        type: Boolean,
-        default: false
-      }
-    }
-  }],
   createdAt: {
     type: Date,
     default: Date.now
@@ -90,38 +64,5 @@ userSchema.pre('save', async function(next) {
     next(error);
   }
 });
-
-// Method to check if user has specific permission for a menu
-userSchema.methods.hasMenuPermission = function(menuId, permission) {
-  const menuAccess = this.accessibleMenus.find(access => 
-    access.menuId.toString() === menuId.toString()
-  );
-  
-  if (!menuAccess) return false;
-  
-  // For view permission, we check if the menu is accessible
-  if (permission === 'view') {
-    return true; // If menu is in accessibleMenus, view is granted by default
-  }
-  
-  // For other permissions, check the specific flag
-  return menuAccess.permissions[permission] === true;
-};
-
-// Method to get all permissions for a specific menu
-userSchema.methods.getMenuPermissions = function(menuId) {
-  const menuAccess = this.accessibleMenus.find(access => 
-    access.menuId.toString() === menuId.toString()
-  );
-  
-  if (!menuAccess) return null;
-  
-  return {
-    view: true, // Always true if menu is accessible
-    add: menuAccess.permissions.add,
-    edit: menuAccess.permissions.edit,
-    delete: menuAccess.permissions.delete
-  };
-};
 
 module.exports = mongoose.model('User', userSchema);

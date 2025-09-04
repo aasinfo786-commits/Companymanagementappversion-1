@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   UserCircle, User, Lock, Image, Shield, CheckCircle, XCircle,
-  Loader2, Building, MapPin, Calendar, Menu, Eye, Plus, Edit, Trash2
+  Loader2, Building, MapPin, Calendar
 } from "lucide-react";
 
 const AddUserForm = () => {
@@ -15,19 +15,15 @@ const AddUserForm = () => {
     companyId: "",
     locationId: "",
     financialYearId: "",
-    accessibleMenus: [],
   });
   
-  const [menuPermissions, setMenuPermissions] = useState({});
   const [companies, setCompanies] = useState([]);
   const [locations, setLocations] = useState([]);
   const [financialYears, setFinancialYears] = useState([]);
-  const [menus, setMenus] = useState([]);
   const [isLoading, setIsLoading] = useState({
     companies: true,
     locations: false,
-    financialYears: false,
-    menus: true
+    financialYears: false
   });
   const [message, setMessage] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
@@ -39,7 +35,7 @@ const AddUserForm = () => {
     hasMinLength: false,
   });
   
-  // Fetch companies and menus on mount
+  // Fetch companies on mount
   useEffect(() => {
     const fetchCompanies = async () => {
       try {
@@ -58,25 +54,7 @@ const AddUserForm = () => {
       }
     };
     
-    const fetchMenus = async () => {
-      try {
-        setIsLoading(prev => ({ ...prev, menus: true }));
-        const token = localStorage.getItem("token");
-        const res = await fetch("http://localhost:5000/api/menus", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error("Failed to fetch menus");
-        const data = await res.json();
-        setMenus(data);
-      } catch (err) {
-        setMessage({ type: "error", text: err.message });
-      } finally {
-        setIsLoading(prev => ({ ...prev, menus: false }));
-      }
-    };
-    
     fetchCompanies();
-    fetchMenus();
   }, []);
   
   // Fetch locations when company changes
@@ -151,49 +129,10 @@ const AddUserForm = () => {
       });
     }
     
-    if (name === "accessibleMenus") {
-      const menuId = value;
-      if (checked) {
-        setFormData(prev => ({
-          ...prev,
-          accessibleMenus: [...prev.accessibleMenus, menuId]
-        }));
-        // Initialize permissions when menu is selected
-        if (!menuPermissions[menuId]) {
-          setMenuPermissions(prev => ({
-            ...prev,
-            [menuId]: { view: true, add: false, edit: false, delete: false }
-          }));
-        }
-      } else {
-        setFormData(prev => ({
-          ...prev,
-          accessibleMenus: prev.accessibleMenus.filter(id => id !== menuId)
-        }));
-        // Remove permissions when menu is deselected
-        const newPerms = { ...menuPermissions };
-        delete newPerms[menuId];
-        setMenuPermissions(newPerms);
-      }
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: type === "checkbox" ? checked : value,
-      }));
-    }
-  };
-  
-  const handlePermissionChange = (menuId, permission) => {
-    setMenuPermissions(prev => {
-      const currentPerms = prev[menuId] || { view: false, add: false, edit: false, delete: false };
-      return {
-        ...prev,
-        [menuId]: {
-          ...currentPerms,
-          [permission]: !currentPerms[permission]
-        }
-      };
-    });
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
   
   const handleImageChange = (e) => {
@@ -268,13 +207,6 @@ const AddUserForm = () => {
       formDataToSend.append("locationId", formData.locationId);
       formDataToSend.append("financialYearId", formData.financialYearId);
       
-      // Add accessible menus with permissions
-      const menuPermissionsData = formData.accessibleMenus.map(menuId => ({
-        menuId,
-        permissions: menuPermissions[menuId] || { view: true, add: false, edit: false, delete: false }
-      }));
-      formDataToSend.append("accessibleMenus", JSON.stringify(menuPermissionsData));
-      
       if (formData.userPicture) {
         formDataToSend.append("userPicture", formData.userPicture, formData.userPicture.name);
       }
@@ -314,9 +246,7 @@ const AddUserForm = () => {
         companyId: "",
         locationId: "",
         financialYearId: "",
-        accessibleMenus: [],
       });
-      setMenuPermissions({});
       setPreviewImage(null);
       setPasswordRequirements({
         hasNumber: false,
@@ -350,63 +280,6 @@ const AddUserForm = () => {
   const inputClass =
     "w-full p-3 rounded-2xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm";
     
-  const renderMenuCheckboxes = (menuItems, level = 0) => {
-    return menuItems.map((menu) => {
-      const isSelected = formData.accessibleMenus.includes(menu._id);
-      const permissions = menuPermissions[menu._id] || {};
-      
-      return (
-        <div key={menu._id} className={`ml-${level * 4}`}>
-          <div className="flex items-center space-x-2 py-1">
-            <input
-              type="checkbox"
-              id={`menu-${menu._id}`}
-              name="accessibleMenus"
-              value={menu._id}
-              checked={isSelected}
-              onChange={handleChange}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <label htmlFor={`menu-${menu._id}`} className="text-sm text-gray-700 dark:text-gray-300 flex items-center">
-              {menu.title}
-            </label>
-          </div>
-          
-          {isSelected && (
-            <div className="ml-8 grid grid-cols-4 gap-2 mt-1">
-              {[
-                { id: 'view', icon: Eye, label: 'View' },
-                { id: 'add', icon: Plus, label: 'Add' },
-                { id: 'edit', icon: Edit, label: 'Edit' },
-                { id: 'delete', icon: Trash2, label: 'Delete' }
-              ].map(({ id, icon: Icon, label }) => (
-                <div key={id} className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id={`perm-${menu._id}-${id}`}
-                    checked={permissions[id] || false}
-                    onChange={() => handlePermissionChange(menu._id, id)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor={`perm-${menu._id}-${id}`} className="text-xs text-gray-600 dark:text-gray-400 ml-1 flex items-center">
-                    <Icon size={12} className="mr-1" />
-                    {label}
-                  </label>
-                </div>
-              ))}
-            </div>
-          )}
-          
-          {menu.children && menu.children.length > 0 && (
-            <div className="ml-4 border-l-2 border-gray-200 dark:border-gray-700 pl-2">
-              {renderMenuCheckboxes(menu.children, level + 1)}
-            </div>
-          )}
-        </div>
-      );
-    });
-  };
-  
   return (
     <div className="ml-0 md:ml-64 transition-all duration-300">
       <div className="max-w-5xl mx-auto mt-10 p-8 bg-white dark:bg-gray-900 rounded-2xl shadow-lg">
@@ -672,27 +545,6 @@ const AddUserForm = () => {
                   />
                 </div>
               )}
-            </div>
-            
-            {/* Menu Permissions */}
-            <div className="col-span-1 md:col-span-2">
-              <label
-                className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center gap-2"
-              >
-                <Menu size={16} /> Menu Permissions
-              </label>
-              <div className="p-4 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 max-h-96 overflow-y-auto">
-                {isLoading.menus ? (
-                  <div className="flex justify-center items-center h-20">
-                    <Loader2 className="animate-spin w-5 h-5 text-gray-500" />
-                    <span className="ml-2 text-gray-500 dark:text-gray-400">Loading menus...</span>
-                  </div>
-                ) : menus.length > 0 ? (
-                  renderMenuCheckboxes(menus)
-                ) : (
-                  <p className="text-gray-500 dark:text-gray-400 text-center py-4">No menus available</p>
-                )}
-              </div>
             </div>
             
             {/* Is Allowed */}
